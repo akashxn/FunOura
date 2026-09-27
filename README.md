@@ -102,7 +102,7 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh   # Rust, to buil
 **2. Get FunOura and build it**
 
 ```bash
-git clone https://github.com/<you>/FunOura.git
+git clone https://github.com/akashxn/FunOura.git
 cd FunOura
 ./setup.sh
 ```
