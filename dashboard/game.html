@@ -1,0 +1,892 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Quick Draw</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Host+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  /* Lights down at the range: the dashboard's dark titanium, and the ring's own LED colours.
+     Every target is a ring seen face on; the finger gun wearing the real one shoots them. */
+  :root {
+    --field: #171b1f;
+    --plate: #20262b;
+    --plate-hover: #2a3137;
+    --hair: #2b3239;
+    --ink: #e6eaee;
+    --ink-2: #a3adb7;
+    --ink-3: #7a848e;
+    --ti-1: #aeb6bd;    /* a titanium band catching the light */
+    --ti-2: #f1f3f5;
+    --ti-3: #88919a;
+    --gold-1: #b08a3e;  /* the gold finish: the rare ring worth triple */
+    --gold-2: #f4dfa4;
+    --gold-3: #c9a257;
+    --pulse: #2aa874;
+    --warm: #bb8a24;
+    --oxy: #dc4f66;
+    --dock: #5a88ee;    /* the charging dock's blue: shots charging */
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    overflow: hidden;
+    background: var(--field);
+    color: var(--ink);
+    font: 400 15px/1.5 "Host Grotesk", ui-sans-serif, system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    user-select: none;           /* a double tap is a double-click: don't select words */
+    -webkit-user-select: none;
+  }
+  canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; cursor: none; touch-action: none; }
+  button, a { font: inherit; color: inherit; }
+  :focus-visible { outline: 2px solid var(--dock); outline-offset: 3px; border-radius: 6px; }
+  [hidden] { display: none !important; }
+
+  /* readouts during a round: small, and out of the way of the targets */
+  .hud { position: fixed; inset: 0 0 auto 0; display: grid; grid-template-columns: 1fr auto 1fr; align-items: start;
+         padding: 22px 28px; pointer-events: none; }
+  .score { font-size: 40px; font-weight: 600; letter-spacing: -0.02em; line-height: 1; font-variant-numeric: tabular-nums; }
+  .streak { margin-top: 8px; min-height: 22px; color: var(--ink-2); font-size: 15px; font-variant-numeric: tabular-nums; }
+  .streak b { color: var(--ink); font-weight: 600; }
+  .clock { display: flex; align-items: center; gap: 12px; padding-top: 14px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+  .track { width: min(32vw, 340px); height: 4px; border-radius: 2px; background: var(--hair); overflow: hidden; }
+  .track i { display: block; height: 100%; background: var(--ink-2); transform-origin: left; }
+  .clock.late { color: var(--oxy); }
+  .clock.late .track i { background: var(--oxy); }
+  .ammo { justify-self: end; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+  .ammo svg { width: 54px; height: 54px; overflow: visible; }
+  .ammo .rim { fill: none; stroke: color-mix(in srgb, var(--ink-3) 40%, transparent); stroke-width: 2.5; }
+  .ammo circle.dome { fill: var(--dock); stroke: var(--dock); stroke-width: 1.2; }
+  .ammo circle.dome.spent { fill: transparent; stroke: var(--ink-3); }
+  .ammo .note { min-height: 22px; color: var(--ink-2); font-size: 14px; }
+  .ammo.out .note { color: var(--ink); }
+
+  /* title, pause and results: text sits above and below the ring in the middle of the screen */
+  .screen { position: fixed; inset: 0; pointer-events: none; text-align: center; }
+  .screen a, .screen button { pointer-events: auto; }
+  .above { position: absolute; left: 16px; right: 16px; bottom: calc(50% + 116px); }
+  .prompt { position: absolute; left: 0; right: 0; top: calc(50% + 94px); margin: 0; color: var(--ink-2); font-size: 16px; }
+  .below { position: absolute; left: 16px; right: 16px; top: calc(50% + 146px); }
+  h1 { margin: 0; font-size: clamp(56px, 9vw, 108px); font-weight: 700; letter-spacing: -0.045em; line-height: .92; }
+  h2 { margin: 0; font-weight: 700; letter-spacing: -0.035em; line-height: 1; }
+  .lede { margin: 16px auto 0; max-width: 36ch; color: var(--ink-2); font-size: 17px; }
+  .moves { display: inline-grid; grid-template-columns: repeat(4, minmax(0, auto)); gap: 10px 40px; margin: 0; text-align: left; }
+  .moves dt { font-weight: 600; }
+  .moves dd { margin: 0; color: var(--ink-2); max-width: 17ch; }
+  .fine { margin: 18px 0 0; color: var(--ink-3); font-size: 14px; }
+  .pause h2 { font-size: 56px; }
+  .final { font-size: clamp(72px, 11vw, 120px); font-variant-numeric: tabular-nums; }
+  .done { margin: 0 0 10px; color: var(--ink-2); font-size: 18px; }
+  .verdict { margin: 12px 0 0; color: var(--ink-2); }
+  .verdict.best { color: var(--pulse); font-weight: 600; }
+  .stats { display: inline-grid; grid-template-columns: repeat(4, auto); gap: 4px 44px; margin: 0; }
+  .stats dt { color: var(--ink-3); font-size: 14px; }
+  .stats dd { margin: 0; font-size: 28px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .back { position: fixed; top: 22px; left: 28px; color: var(--ink-2); text-decoration: underline; text-underline-offset: 3px; }
+  .back:hover { color: var(--ink); }
+
+  .count { position: fixed; left: 0; right: 0; top: 50%; transform: translateY(-50%); margin: 0; text-align: center;
+           font-size: 136px; font-weight: 700; letter-spacing: -0.04em; line-height: 1; pointer-events: none; }
+  .count.tick { animation: tick .35s ease-out; }
+  .count.go { animation: go .7s ease-out forwards; }
+  @keyframes tick { from { opacity: 0; transform: translateY(-50%) scale(1.25); } }
+  @keyframes go { from { opacity: 1; transform: translateY(-50%) scale(1); } to { opacity: 0; transform: translateY(-50%) scale(1.35); } }
+
+  /* ScreenOura's state, in the dashboard's language: the same blue LED */
+  .chip { position: fixed; left: 28px; bottom: 22px; display: flex; align-items: center; gap: 12px; max-width: calc(100vw - 190px);
+          color: var(--ink-2); font-size: 14px; text-align: left; }
+  .led { flex: none; width: 12px; height: 12px; border-radius: 50%; border: 1.5px solid var(--ink-3); }
+  .led[data-state="connecting"] { border-color: var(--dock); background: var(--dock); animation: blink 1s steps(2, jump-none) infinite; }
+  .led[data-state="running"] { border-color: var(--dock); background: color-mix(in srgb, var(--dock) 45%, transparent); }
+  .led[data-state="steering"] { border-color: var(--dock); background: var(--dock); box-shadow: 0 0 0 4px color-mix(in srgb, var(--dock) 22%, transparent); }
+  @keyframes blink { 50% { opacity: .25; } }
+  .btn { flex: none; border: 0; border-radius: 10px; padding: 8px 14px; background: var(--plate); color: var(--ink); cursor: pointer; font-weight: 500; }
+  .btn:hover:not(:disabled) { background: var(--plate-hover); }
+  .btn:disabled { opacity: .5; cursor: default; }
+  .sound { position: fixed; right: 28px; bottom: 22px; }
+  .sound[aria-pressed="false"] { color: var(--ink-3); }
+
+  @media (max-width: 760px) {
+    .moves, .stats { grid-template-columns: repeat(2, minmax(0, auto)); }
+    .fine { display: none; }
+    .hud { padding: 16px; }
+    .score { font-size: 32px; }
+    .chip { left: 16px; right: 16px; bottom: 16px; max-width: none; flex-wrap: wrap; }
+    .sound { right: 16px; top: 12px; bottom: auto; }
+    .back { left: 16px; top: 16px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .count.tick, .count.go { animation: none; }
+    .count.go { opacity: 0; }
+    .led[data-state="connecting"] { animation: none; }
+  }
+</style>
+</head>
+<body>
+<canvas id="field" aria-label="Quick Draw target range"></canvas>
+
+<div class="hud" id="hud" hidden>
+  <div>
+    <div class="score" id="score">0</div>
+    <div class="streak" id="streak"></div>
+  </div>
+  <div class="clock" id="clock"><div class="track"><i id="timeFill"></i></div><span id="timeText">1:00</span></div>
+  <div class="ammo" id="ammo">
+    <svg viewBox="-27 -27 54 54" aria-hidden="true"><circle class="rim" r="17"/></svg>
+    <span class="note" id="ammoNote" role="status"></span>
+  </div>
+</div>
+
+<section class="screen" id="titleScreen">
+  <a class="back" href="/">Back to the dashboard</a>
+  <div class="above">
+    <h1>Quick Draw</h1>
+    <p class="lede">Hit the rings before they fade. You have 60 seconds and six shots at a time.</p>
+  </div>
+  <p class="prompt">Shoot the ring to start</p>
+  <div class="below">
+    <dl class="moves">
+      <div><dt>Aim</dt><dd>Tilt the finger gun</dd></div>
+      <div><dt>Fire</dt><dd>Tap your thumb on your index finger</dd></div>
+      <div><dt>Reload</dt><dd>Sweep your hand, or wait a second</dd></div>
+      <div><dt>Pause</dt><dd>Palm up for a second</dd></div>
+    </dl>
+    <p class="fine" id="bestTitle">The game fills the screen while you play, so stray shots stay in it. Esc leaves full screen.</p>
+  </div>
+</section>
+
+<section class="screen pause" id="pauseScreen" hidden>
+  <div class="above">
+    <h2>Paused</h2>
+    <p class="lede" id="pauseWhy"></p>
+  </div>
+  <p class="prompt" id="pausePrompt">Shoot the ring to carry on</p>
+</section>
+
+<section class="screen" id="overScreen" hidden>
+  <a class="back" href="/">Back to the dashboard</a>
+  <div class="above">
+    <p class="done">Time's up</p>
+    <h2 class="final" id="finalScore">0</h2>
+    <p class="verdict" id="verdict"></p>
+  </div>
+  <p class="prompt" id="againPrompt">Shoot the ring to play again</p>
+  <div class="below">
+    <dl class="stats">
+      <div><dt>Hits</dt><dd id="statHits">0</dd></div>
+      <div><dt>Accuracy</dt><dd id="statAccuracy">0%</dd></div>
+      <div><dt>Best streak</dt><dd id="statStreak">0</dd></div>
+      <div><dt>Bullseyes</dt><dd id="statBulls">0</dd></div>
+    </dl>
+  </div>
+</section>
+
+<p class="count" id="count" aria-live="assertive"></p>
+
+<div class="chip" id="chip">
+  <span class="led" id="chipLed" aria-hidden="true"></span>
+  <span id="chipText">Looking for ScreenOura…</span>
+  <button class="btn" id="chipStart" hidden>Start ScreenOura</button>
+</div>
+<button class="btn sound" id="soundBtn" aria-pressed="true">Sound on</button>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const css = getComputedStyle(document.documentElement);
+const token = (name) => css.getPropertyValue(name).trim();
+const TAU = Math.PI * 2;
+const ROUND = 60;        // seconds in a round
+const SHOTS = 6;
+const SLACK = 10;        // px of forgiveness around a ring: joystick aiming stops a little short
+const AUTO_RELOAD = 1.0; // s after the last shot before reloading on its own; a sweep reloads at once
+const RELOAD_TIME = 0.4;
+const EDGE = { top: 118, right: 60, bottom: 84, left: 60 };  // keep rings off the readouts
+const LEDS = ["--pulse", "--warm", "--oxy", "--dock"].map(token);
+const DOCK = token("--dock"), INK = token("--ink"), INK3 = token("--ink-3"), FIELD = token("--field");
+const TITANIUM = ["--ti-1", "--ti-2", "--ti-3"].map(token);
+const GOLD = ["--gold-1", "--gold-2", "--gold-3"].map(token);
+const reduced = matchMedia("(prefers-reduced-motion: reduce)");
+const clamp = (v, lo, hi) => Math.min(Math.max(v, lo), hi);
+const lerp = (a, b, t) => a + (b - a) * clamp(t, 0, 1);
+const easeOut = (t) => 1 - (1 - t) ** 3;
+const rgba = (hex, a) => { const n = parseInt(hex.slice(1), 16); return `rgba(${n >> 16 & 255},${n >> 8 & 255},${n & 255},${a})`; };
+const store = {
+  get(k, fallback) { try { const v = localStorage.getItem(k); return v === null ? fallback : JSON.parse(v); } catch { return fallback; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* private window: fine */ } },
+};
+
+// --- the round -----------------------------------------------------------------
+
+const G = {
+  mode: "title",          // title | countdown | playing | paused | over
+  t: 0,                   // seconds played this round; stands still while paused
+  score: 0, streak: 0, bestStreak: 0, shots: 0, hits: 0, bulls: 0,
+  ammo: SHOTS, reloading: false, reloadAt: 0, lastShot: 0,
+  targets: [], fx: [], hitTimes: [], nextSpawn: 0,
+  aim: { x: 0, y: 0, seen: false }, recoil: 0, shake: 0,
+  count: 0, countShown: 0, pause: null, ringPlay: false, againAt: 0,
+  best: store.get("quickdraw.best", 0),
+};
+const clockNow = () => performance.now() / 1000;
+
+function menuRing() {
+  // the ring in the middle that starts, resumes, or restarts a round when you shoot it
+  const wanted = G.mode === "title" || (G.mode === "over" && clockNow() >= G.againAt)
+    || (G.mode === "paused" && G.pause.reason !== "steering");
+  return wanted ? { x: W / 2, y: H / 2, r: 62, color: DOCK } : null;
+}
+
+// Full screen keeps overshooting shots inside the game instead of clicking other apps.
+// Browsers only allow it from a click or key press, so it's asked for on those.
+function fullScreen() {
+  if (!document.fullscreenElement && document.documentElement.requestFullscreen) {
+    document.documentElement.requestFullscreen().catch(() => {});
+  }
+}
+
+function startRound() {
+  Sound.wake();
+  fullScreen();
+  Object.assign(G, { t: 0, score: 0, streak: 0, bestStreak: 0, shots: 0, hits: 0, bulls: 0, ammo: SHOTS,
+                     reloading: false, lastShot: 0, targets: [], hitTimes: [], nextSpawn: 0, pause: null });
+  countdown();
+}
+
+function countdown() {
+  G.ringPlay = ring.running && ring.connected && ring.steering;  // playing with the ring, not the trackpad
+  G.count = 3;
+  G.countShown = 0;
+  show("countdown");
+}
+
+function pause(reason) {
+  if (G.mode === "playing" || G.mode === "countdown") showPause(reason);
+}
+
+function showPause(reason) {
+  G.pause = { reason };
+  $("pauseWhy").textContent = {
+    steering: "Steering is paused. Palm up for a second to carry on.",
+    stopped: "ScreenOura stopped. Start it again below, or carry on with the trackpad.",
+    hidden: "The game stops while you can't see it.",
+    fullscreen: "You left full screen.",
+    key: "Take your time.",
+  }[reason];
+  $("pausePrompt").hidden = reason === "steering";
+  $("count").textContent = "";
+  show("paused");
+}
+
+function resume() {
+  if (G.mode !== "paused") return;
+  G.pause = null;
+  countdown();
+}
+
+function endRound() {
+  const best = G.score > G.best && G.score > 0;
+  if (best) { G.best = G.score; store.set("quickdraw.best", G.best); }
+  $("finalScore").textContent = G.score.toLocaleString();
+  $("verdict").textContent = best ? "Your best yet" : G.best ? `Your best is ${G.best.toLocaleString()}` : "";
+  $("verdict").classList.toggle("best", best);
+  $("statHits").textContent = G.hits;
+  $("statAccuracy").textContent = G.shots ? `${Math.round((100 * G.hits) / G.shots)}%` : "–";
+  $("statStreak").textContent = G.bestStreak;
+  $("statBulls").textContent = G.bulls;
+  G.targets = [];
+  G.againAt = clockNow() + 1.2;  // a trailing shot can't restart it by accident
+  $("againPrompt").style.visibility = "hidden";
+  setTimeout(() => { $("againPrompt").style.visibility = ""; }, 1200);
+  Sound.end();
+  show("over");
+}
+
+function show(mode) {
+  G.mode = mode;
+  $("titleScreen").hidden = mode !== "title";
+  $("pauseScreen").hidden = mode !== "paused";
+  $("overScreen").hidden = mode !== "over";
+  $("hud").hidden = !["countdown", "playing", "paused"].includes(mode);
+  // During a round every shot is a real click: nothing clickable may sit under the crosshair.
+  const calm = mode === "title" || mode === "paused" || mode === "over";
+  $("chip").hidden = !calm;
+  $("soundBtn").hidden = !calm;
+  if (mode === "title" && G.best) $("bestTitle").textContent = `Your best is ${G.best.toLocaleString()}. The game fills the screen while you play; Esc leaves full screen.`;
+}
+
+// Rings live longer for a slower aim: about the time your last few hits took, with room to spare.
+function lifetime() {
+  const recent = G.hitTimes.slice(-5);
+  if (recent.length < 3) return 5;
+  const avg = recent.reduce((a, b) => a + b, 0) / recent.length;
+  return clamp(avg * 1.7 + 0.8, 3, 5.5);
+}
+
+function spawn() {
+  const p = G.t / ROUND;
+  const gold = G.t > 15 && Math.random() < 0.12;
+  const r = lerp(62, 46, p) * (gold ? 0.8 : 1);
+  const drift = G.t < 30 ? 0 : lerp(0, 28, (G.t - 30) / 30) + (gold ? 16 : 0);
+  const inside = (x, y) => x > EDGE.left + r && x < W - EDGE.right - r && y > EDGE.top + r && y < H - EDGE.bottom - r;
+  const clear = (x, y) => G.targets.every((o) => o.gone || Math.hypot(o.x - x, o.y - y) > o.r + r + 40);
+  let x, y;
+  // Within reach: 150-450 px from where you're aiming, since joystick aiming covers ground slowly.
+  for (let i = 0; i < 60 && x === undefined; i++) {
+    const a = Math.random() * TAU, d = 150 + Math.random() * 300;
+    const cx = G.aim.x + Math.cos(a) * d, cy = G.aim.y + Math.sin(a) * d;
+    if (inside(cx, cy) && clear(cx, cy)) { x = cx; y = cy; }
+  }
+  if (x === undefined) {
+    x = lerp(EDGE.left + r, W - EDGE.right - r, Math.random());
+    y = lerp(EDGE.top + r, H - EDGE.bottom - r, Math.random());
+  }
+  const heading = Math.random() * TAU;
+  G.targets.push({ x, y, r, gold, color: gold ? GOLD[1] : LEDS[Math.floor(Math.random() * LEDS.length)],
+                   vx: Math.cos(heading) * drift, vy: Math.sin(heading) * drift,
+                   born: G.t, life: lifetime() * (gold ? 0.8 : 1), lit: 0, gone: null });
+}
+
+function streakBonus() { return Math.min(3, 1 + 0.5 * Math.floor(G.streak / 2)); }
+
+function shoot(x, y) {
+  G.aim.x = x; G.aim.y = y; G.aim.seen = true;
+  if (G.mode !== "playing") {
+    const m = menuRing();
+    if (m && Math.hypot(x - m.x, y - m.y) <= m.r + SLACK + 6) {
+      burst(m.x, m.y, m.r, m.color);
+      Sound.wake();
+      Sound.hit(false, false);
+      if (G.mode === "paused") { fullScreen(); resume(); } else startRound();
+    }
+    return;
+  }
+  if (G.reloading || G.ammo === 0) {
+    Sound.empty();
+    return;
+  }
+  G.ammo--;
+  G.shots++;
+  G.lastShot = G.t;
+  G.recoil = 1;
+  Sound.shot();
+  let hit = null;
+  for (const o of G.targets) {
+    const d = Math.hypot(o.x - x, o.y - y);
+    if (!o.gone && d <= o.r + SLACK && (!hit || d < hit.d)) hit = { o, d };
+  }
+  if (!hit) {
+    G.streak = 0;
+    G.fx.push({ k: "puff", x, y, born: clockNow(), life: 0.35 });
+    G.fx.push({ k: "text", x, y: y - 18, text: "Miss", color: INK3, born: clockNow(), life: 0.7 });
+    Sound.miss();
+    return;
+  }
+  const { o, d } = hit;
+  const age = G.t - o.born, bull = d <= o.r * 0.38;
+  G.streak++;
+  G.bestStreak = Math.max(G.bestStreak, G.streak);
+  G.hits++;
+  if (bull) G.bulls++;
+  const quick = Math.round(50 * Math.max(0, 1 - age / o.life));
+  const points = Math.round((100 + (bull ? 50 : 0) + quick) * streakBonus() * (o.gold ? 3 : 1));
+  G.score += points;
+  G.hitTimes.push(age);
+  G.targets.splice(G.targets.indexOf(o), 1);
+  G.nextSpawn = Math.max(G.nextSpawn, G.t + 0.3);
+  burst(o.x, o.y, o.r, o.color);
+  G.fx.push({ k: "text", x: o.x, y: o.y - o.r * 0.2, text: `+${points}`, sub: o.gold ? "Gold ring" : bull ? "Bullseye" : "",
+              color: o.color, born: clockNow(), life: 0.9 });
+  Sound.hit(bull, o.gold);
+}
+
+function reload() {
+  if (G.mode !== "playing" || G.reloading || G.ammo === SHOTS) return;
+  G.reloading = true;
+  G.reloadAt = G.t + RELOAD_TIME;
+  Sound.reload();
+}
+
+function update(dt) {
+  G.recoil = Math.max(0, G.recoil - dt * 8);
+  G.shake = Math.max(0, G.shake - dt * 7);
+  if (G.mode === "countdown") {
+    G.count -= dt;
+    const n = Math.ceil(G.count);
+    if (n > 0 && n !== G.countShown) {
+      G.countShown = n;
+      flashCount(String(n), "tick");
+      Sound.count(false);
+    }
+    if (G.count <= 0) {
+      flashCount("Draw!", "go");
+      Sound.count(true);
+      show("playing");
+    }
+    return;
+  }
+  if (G.mode !== "playing") return;
+  G.t += dt;
+  if (G.reloading && G.t >= G.reloadAt) {
+    G.reloading = false;
+    G.ammo = SHOTS;
+  }
+  if (G.ammo === 0 && !G.reloading && G.t - G.lastShot >= AUTO_RELOAD) reload();
+  for (const o of G.targets) {
+    o.x += o.vx * dt;
+    o.y += o.vy * dt;
+    if (o.x < EDGE.left + o.r || o.x > W - EDGE.right - o.r) { o.vx = -o.vx; o.x = clamp(o.x, EDGE.left + o.r, W - EDGE.right - o.r); }
+    if (o.y < EDGE.top + o.r || o.y > H - EDGE.bottom - o.r) { o.vy = -o.vy; o.y = clamp(o.y, EDGE.top + o.r, H - EDGE.bottom - o.r); }
+    const under = G.aim.seen && Math.hypot(G.aim.x - o.x, G.aim.y - o.y) <= o.r + SLACK;
+    o.lit += ((under ? 1 : 0) - o.lit) * Math.min(1, dt * 14);
+    if (!o.gone && G.t - o.born >= o.life) {
+      o.gone = G.t;
+      G.streak = 0;
+      G.nextSpawn = Math.max(G.nextSpawn, G.t + 0.3);
+      G.fx.push({ k: "text", x: o.x, y: o.y, text: "Too slow", color: INK3, born: clockNow(), life: 0.8 });
+      Sound.fade();
+    }
+  }
+  G.targets = G.targets.filter((o) => !o.gone || G.t - o.gone < 0.25);
+  const alive = G.targets.filter((o) => !o.gone).length;
+  if (alive < (G.t < 20 ? 1 : 2) && G.t >= G.nextSpawn) {
+    spawn();
+    G.nextSpawn = G.t + 0.8;  // a second ring, when there are two, follows a moment later
+  }
+  if (G.t >= ROUND) endRound();
+}
+
+function flashCount(text, kind) {
+  const el = $("count");
+  el.textContent = text;
+  el.className = "count";
+  void el.offsetWidth;
+  el.classList.add(kind);
+}
+
+// --- drawing ---------------------------------------------------------------------
+
+const cv = $("field"), ctx = cv.getContext("2d");
+let W = 0, H = 0, vignette = null;
+
+function resize() {
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  W = window.innerWidth;
+  H = window.innerHeight;
+  cv.width = Math.round(W * dpr);
+  cv.height = Math.round(H * dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  vignette = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.15, W / 2, H / 2, Math.max(W, H) * 0.75);
+  vignette.addColorStop(0, "rgba(255,255,255,0.03)");
+  vignette.addColorStop(1, "rgba(0,0,0,0.5)");
+  for (const o of G.targets) {
+    o.x = clamp(o.x, EDGE.left + o.r, Math.max(EDGE.left + o.r, W - EDGE.right - o.r));
+    o.y = clamp(o.y, EDGE.top + o.r, Math.max(EDGE.top + o.r, H - EDGE.bottom - o.r));
+  }
+  if (!G.aim.seen) { G.aim.x = W / 2; G.aim.y = H / 2 + 200; }
+}
+
+// A ring face on: titanium (or gold) band lit from the top left like the dashboard's dial,
+// three sensor domes glowing on the inside, and the time left drawn as the dial's progress arc.
+function drawRing(x, y, r, color, { gold = false, alpha = 1, scale = 1, lit = 0, timer = null } = {}) {
+  const R = r * scale, band = R * 0.27;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  const glow = ctx.createRadialGradient(x, y, R * 0.45, x, y, R * 1.6);
+  glow.addColorStop(0, rgba(color, 0));
+  glow.addColorStop(0.6, rgba(color, 0.14 + 0.32 * lit));
+  glow.addColorStop(1, rgba(color, 0));
+  ctx.fillStyle = glow;
+  ctx.beginPath(); ctx.arc(x, y, R * 1.6, 0, TAU); ctx.fill();
+  const metal = gold ? GOLD : TITANIUM;
+  const g = ctx.createLinearGradient(x - R, y - R, x + R, y + R);
+  g.addColorStop(0, metal[0]); g.addColorStop(0.45, metal[1]); g.addColorStop(1, metal[2]);
+  ctx.lineWidth = band;
+  ctx.strokeStyle = g;
+  ctx.beginPath(); ctx.arc(x, y, R - band / 2, 0, TAU); ctx.stroke();
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = "rgba(8,10,12,0.6)";
+  ctx.beginPath(); ctx.arc(x, y, R, 0, TAU); ctx.stroke();
+  ctx.beginPath(); ctx.arc(x, y, R - band, 0, TAU); ctx.stroke();
+  ctx.strokeStyle = rgba(color, 0.35 + 0.3 * lit);  // the bullseye's edge: hits inside score extra
+  ctx.beginPath(); ctx.arc(x, y, R * 0.38, 0, TAU); ctx.stroke();
+  ctx.fillStyle = color;
+  ctx.shadowColor = color;
+  ctx.shadowBlur = 6 + 12 * lit;
+  const dome = Math.max(2, R * 0.05), inner = R - band - R * 0.09;
+  for (const k of [-1, 0, 1]) {
+    const a = Math.PI / 2 + k * 0.24;
+    ctx.beginPath(); ctx.arc(x + Math.cos(a) * inner, y + Math.sin(a) * inner, dome, 0, TAU); ctx.fill();
+  }
+  ctx.beginPath(); ctx.arc(x, y, R * 0.1, 0, TAU); ctx.fill();
+  ctx.shadowBlur = 0;
+  if (timer !== null) {
+    ctx.lineWidth = 2.5;
+    ctx.lineCap = "round";
+    ctx.strokeStyle = color;
+    ctx.beginPath(); ctx.arc(x, y, R + 9, -Math.PI / 2, -Math.PI / 2 + TAU * clamp(timer, 0, 1)); ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function drawAim() {
+  if (!G.aim.seen) return;
+  const { x, y } = G.aim;
+  const m = menuRing();
+  const over = G.targets.find((o) => !o.gone && Math.hypot(o.x - x, o.y - y) <= o.r + SLACK)
+    || (m && Math.hypot(m.x - x, m.y - y) <= m.r + SLACK + 6 ? m : null);
+  const color = over ? over.color : INK, r = 12 + 8 * G.recoil;
+  ctx.save();
+  ctx.lineCap = "round";
+  for (const [width, stroke] of [[4.5, "rgba(0,0,0,0.55)"], [1.7, color]]) {
+    ctx.lineWidth = width;
+    ctx.strokeStyle = stroke;
+    ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.stroke();
+    ctx.beginPath();
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      ctx.moveTo(x + dx * (r + 4), y + dy * (r + 4));
+      ctx.lineTo(x + dx * (r + 11), y + dy * (r + 11));
+    }
+    ctx.stroke();
+  }
+  ctx.fillStyle = color;
+  ctx.beginPath(); ctx.arc(x, y, 1.9, 0, TAU); ctx.fill();
+  ctx.restore();
+}
+
+function burst(x, y, r, color) {
+  // The one loud moment: the LED flashes out as a shockwave and the band breaks apart.
+  const now = clockNow();
+  G.fx.push({ k: "wave", x, y, r, color, born: now, life: 0.45 });
+  if (reduced.matches) return;
+  G.shake = 1;
+  for (let i = 0; i < 14; i++) {
+    const a = (i / 14) * TAU + Math.random() * 0.3, speed = 150 + Math.random() * 170;
+    G.fx.push({ k: "shard", x: x + Math.cos(a) * r * 0.86, y: y + Math.sin(a) * r * 0.86,
+                vx: Math.cos(a) * speed, vy: Math.sin(a) * speed, a: a + Math.PI / 2, spin: (Math.random() - 0.5) * 14,
+                len: r * 0.32, color: i % 3 ? TITANIUM[1] : color, born: now, life: 0.55 });
+  }
+}
+
+function drawFx(now) {
+  for (const f of G.fx) {
+    const age = now - f.born, t = age / f.life;
+    if (t >= 1) continue;
+    ctx.save();
+    ctx.globalAlpha = 1 - t;
+    if (f.k === "wave") {
+      ctx.strokeStyle = f.color;
+      ctx.lineWidth = 4 * (1 - t) + 0.5;
+      ctx.shadowColor = f.color;
+      ctx.shadowBlur = 16;
+      ctx.beginPath(); ctx.arc(f.x, f.y, f.r * (1 + 1.3 * easeOut(t)), 0, TAU); ctx.stroke();
+    } else if (f.k === "shard") {
+      const travel = (1 - Math.exp(-4 * age)) / 4, a = f.a + f.spin * age;
+      const x = f.x + f.vx * travel, y = f.y + f.vy * travel;
+      ctx.strokeStyle = f.color;
+      ctx.lineWidth = Math.max(2, f.len * 0.3);
+      ctx.lineCap = "round";
+      ctx.beginPath();
+      ctx.moveTo(x - Math.cos(a) * f.len / 2, y - Math.sin(a) * f.len / 2);
+      ctx.lineTo(x + Math.cos(a) * f.len / 2, y + Math.sin(a) * f.len / 2);
+      ctx.stroke();
+    } else if (f.k === "puff") {
+      ctx.strokeStyle = INK3;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(f.x, f.y, 4 + 14 * easeOut(t), 0, TAU); ctx.stroke();
+    } else if (f.k === "text") {
+      const rise = reduced.matches ? 0 : 30 * easeOut(t);
+      ctx.textAlign = "center";
+      ctx.fillStyle = f.color;
+      ctx.font = "600 26px 'Host Grotesk', system-ui, sans-serif";
+      ctx.fillText(f.text, f.x, f.y - rise);
+      if (f.sub) {
+        ctx.fillStyle = INK;
+        ctx.font = "500 15px 'Host Grotesk', system-ui, sans-serif";
+        ctx.fillText(f.sub, f.x, f.y - rise + 22);
+      }
+    }
+    ctx.restore();
+  }
+  G.fx = G.fx.filter((f) => now - f.born < f.life);
+}
+
+function draw(now) {
+  ctx.save();
+  if (G.shake > 0) ctx.translate((Math.random() - 0.5) * 6 * G.shake, (Math.random() - 0.5) * 6 * G.shake);
+  ctx.fillStyle = FIELD;
+  ctx.fillRect(-10, -10, W + 20, H + 20);
+  ctx.fillStyle = vignette;
+  ctx.fillRect(-10, -10, W + 20, H + 20);
+  const dim = G.mode === "playing" ? 1 : 0.3;  // frozen rings stay in view behind a countdown or pause
+  for (const o of G.targets) {
+    const age = G.t - o.born;
+    const appear = reduced.matches ? 1 : 0.6 + 0.4 * easeOut(clamp(age / 0.18, 0, 1));
+    const leave = o.gone === null ? 0 : clamp((G.t - o.gone) / 0.25, 0, 1);
+    drawRing(o.x, o.y, o.r, o.color, { gold: o.gold, lit: o.lit, alpha: dim * (1 - leave),
+                                        scale: appear * (1 - 0.35 * leave), timer: o.gone === null ? 1 - age / o.life : null });
+  }
+  const m = menuRing();
+  if (m) {
+    const breathe = reduced.matches ? 0.5 : 0.5 + 0.5 * Math.sin(now * 2.4);
+    drawRing(m.x, m.y, m.r, m.color, { lit: 0.25 + 0.5 * breathe });
+  }
+  drawFx(now);
+  drawAim();
+  ctx.restore();
+}
+
+// --- readouts --------------------------------------------------------------------
+
+const shown = {};
+function put(id, value, prop = "textContent") {
+  if (shown[id + prop] === value) return;
+  shown[id + prop] = value;
+  $(id)[prop] = value;
+}
+
+const domes = (() => {
+  const svg = $("ammo").querySelector("svg"), out = [];
+  for (let i = 0; i < SHOTS; i++) {
+    const a = -Math.PI / 2 + (i * TAU) / SHOTS;
+    const c = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+    c.setAttribute("class", "dome");
+    c.setAttribute("cx", (Math.cos(a) * 17).toFixed(2));
+    c.setAttribute("cy", (Math.sin(a) * 17).toFixed(2));
+    c.setAttribute("r", "4.2");
+    svg.appendChild(c);
+    out.push(c);
+  }
+  return out;
+})();
+
+function renderHud() {
+  if ($("hud").hidden) return;
+  put("score", G.score.toLocaleString());
+  put("streak", G.streak >= 2 ? `<b>${G.streak} in a row</b>, points ×${streakBonus()}` : "", "innerHTML");
+  const left = Math.max(0, ROUND - G.t), secs = Math.ceil(left);
+  put("timeText", `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")}`);
+  $("timeFill").style.transform = `scaleX(${(left / ROUND).toFixed(4)})`;
+  $("clock").classList.toggle("late", left <= 10);
+  // Reloading charges the domes one by one, like the ring on its dock.
+  const charged = G.reloading
+    ? G.ammo + Math.ceil((SHOTS - G.ammo) * clamp(1 - (G.reloadAt - G.t) / RELOAD_TIME, 0, 1)) : G.ammo;
+  domes.forEach((c, i) => c.classList.toggle("spent", i >= charged));
+  $("ammo").classList.toggle("out", G.ammo === 0 && !G.reloading);
+  put("ammoNote", G.reloading ? "Reloading" : G.ammo === 0 ? "Sweep to reload" : "");
+}
+
+// --- ScreenOura, from the dashboard's live updates --------------------------------
+
+const ring = { present: false, running: false, connected: false, steering: false, stopping: false, busy: null, error: "" };
+
+function listen() {
+  if (location.protocol === "file:") { renderChip(); return; }
+  const es = new EventSource("/api/stream");
+  es.onopen = () => { ring.present = true; renderChip(); };
+  es.onerror = () => { ring.present = false; ring.running = false; renderChip(); };
+  es.onmessage = (e) => {
+    const m = JSON.parse(e.data);
+    if (m.type === "state") {
+      ring.busy = m.busy;
+      ring.running = m.busy === "screenoura";
+      screenFields(m.screenoura);
+    } else if (m.type === "busy") {
+      ring.busy = m.what;
+      ring.running = m.what === "screenoura";
+      if (ring.running) ring.error = "";
+      else screenFields({});
+    } else if (m.type === "screen") {
+      screenFields(m);
+    } else if (m.type === "error" && m.name === "screenoura") {
+      ring.error = m.message;
+    } else {
+      return;
+    }
+    ringChanged();
+  };
+}
+
+function screenFields(s) {
+  ring.connected = Boolean(s.connected);
+  ring.steering = Boolean(s.steering);
+  ring.stopping = Boolean(s.stopping);
+}
+
+function ringChanged() {
+  const steering = ring.running && ring.connected && ring.steering && !ring.stopping;
+  if (G.ringPlay && (G.mode === "playing" || G.mode === "countdown")) {
+    if (!ring.running || ring.stopping) pause("stopped");
+    else if (ring.connected && !ring.steering) pause("steering");  // palm up: the pause gesture
+  } else if (G.mode === "paused" && G.pause.reason === "steering") {
+    if (steering) resume();  // palm up again: carry on
+    else if (!ring.running || ring.stopping) showPause("stopped");  // no palm up can resume it now: show the ring
+  }
+  renderChip();
+}
+
+function renderChip() {
+  let state = "off", text;
+  if (!ring.present) {
+    text = location.protocol === "file:" ? "Open this from the dashboard to play with the ring. The trackpad works too."
+      : "Can't reach the dashboard, so the ring is out for now. The trackpad works.";
+  } else if (!ring.running) {
+    text = ring.error || (ring.busy ? `The ring is busy with ${ring.busy === "heart" ? "a heart reading" : "a reading"}. The trackpad works meanwhile.`
+      : "ScreenOura is off. Start it to play with the ring.");
+  } else if (ring.stopping) {
+    state = "connecting"; text = "ScreenOura is stopping…";
+  } else if (!ring.connected) {
+    state = "connecting"; text = "ScreenOura is connecting to the ring…";
+  } else if (ring.steering) {
+    state = "steering"; text = ring.error || "ScreenOura is steering. Aim with the ring.";
+  } else {
+    state = "running"; text = "ScreenOura is paused. Palm up for a second to steer.";
+  }
+  $("chipLed").dataset.state = state;
+  $("chipText").textContent = text;
+  $("chipStart").hidden = !(ring.present && !ring.running && !ring.busy);
+}
+
+$("chipStart").addEventListener("click", async () => {
+  const b = $("chipStart");
+  ring.error = "";
+  b.disabled = true;
+  try {
+    const r = await fetch("/api/screenoura/start", { method: "POST", body: "{}",
+      headers: { "X-Oura-Play": "1", "Content-Type": "application/json" } });
+    if (!r.ok) ring.error = (await r.json()).error || "ScreenOura didn't start.";
+  } catch {
+    ring.error = "The dashboard server isn't answering.";
+  }
+  b.disabled = false;
+  renderChip();
+});
+
+// --- sound: short and distinct, since ScreenOura already pops on every tap ----------
+
+const Sound = {
+  ac: null,
+  on: store.get("quickdraw.sound", true),
+  noise: null,
+  wake() {
+    if (!this.ac) {
+      try { this.ac = new (window.AudioContext || window.webkitAudioContext)(); } catch { return; }
+    }
+    if (this.ac.state === "suspended") this.ac.resume();
+  },
+  tone(freq, dur, { type = "sine", gain = 0.12, to = null, delay = 0 } = {}) {
+    const ac = this.ac;
+    if (!ac || !this.on) return;
+    const t = ac.currentTime + delay, osc = ac.createOscillator(), env = ac.createGain();
+    osc.type = type;
+    osc.frequency.setValueAtTime(freq, t);
+    if (to) osc.frequency.exponentialRampToValueAtTime(to, t + dur);
+    env.gain.setValueAtTime(0.0001, t);
+    env.gain.exponentialRampToValueAtTime(gain, t + 0.006);
+    env.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    osc.connect(env).connect(ac.destination);
+    osc.start(t);
+    osc.stop(t + dur + 0.03);
+  },
+  hiss(dur, { gain = 0.2, from = 2400, to = 400, delay = 0 } = {}) {
+    const ac = this.ac;
+    if (!ac || !this.on) return;
+    if (!this.noise) {
+      this.noise = ac.createBuffer(1, ac.sampleRate / 2, ac.sampleRate);
+      const d = this.noise.getChannelData(0);
+      for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    }
+    const t = ac.currentTime + delay, src = ac.createBufferSource(), filter = ac.createBiquadFilter(), env = ac.createGain();
+    src.buffer = this.noise;
+    filter.type = "lowpass";
+    filter.frequency.setValueAtTime(from, t);
+    filter.frequency.exponentialRampToValueAtTime(to, t + dur);
+    env.gain.setValueAtTime(gain, t);
+    env.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    src.connect(filter).connect(env).connect(ac.destination);
+    src.start(t);
+    src.stop(t + dur + 0.03);
+  },
+  shot() { this.hiss(0.09, { gain: 0.24, from: 2800, to: 500 }); this.tone(150, 0.07, { type: "triangle", gain: 0.16, to: 70 }); },
+  hit(bull, gold) {
+    this.tone(gold ? 1175 : 988, 0.09, { gain: 0.13 });
+    this.tone(gold ? 1760 : 1480, 0.16, { gain: 0.09, delay: 0.05 });
+    if (bull || gold) this.tone(2349, 0.12, { gain: 0.05, delay: 0.1 });
+  },
+  miss() { this.tone(210, 0.08, { gain: 0.07, to: 140 }); },
+  empty() { this.tone(3200, 0.015, { type: "square", gain: 0.04 }); },
+  reload() { this.hiss(0.14, { gain: 0.07, from: 700, to: 3200 }); this.tone(2600, 0.02, { type: "square", gain: 0.04, delay: 0.34 }); },
+  fade() { this.tone(330, 0.14, { gain: 0.05, to: 220 }); },
+  count(last) { this.tone(last ? 880 : 587, last ? 0.24 : 0.1, { type: "triangle", gain: 0.1 }); },
+  end() { this.tone(659, 0.15, { type: "triangle", gain: 0.09 }); this.tone(523, 0.32, { type: "triangle", gain: 0.09, delay: 0.16 }); },
+};
+
+function renderSound() {
+  $("soundBtn").textContent = Sound.on ? "Sound on" : "Sound off";
+  $("soundBtn").setAttribute("aria-pressed", String(Sound.on));
+}
+function toggleSound() {
+  Sound.on = !Sound.on;
+  store.set("quickdraw.sound", Sound.on);
+  Sound.wake();
+  renderSound();
+}
+$("soundBtn").addEventListener("click", toggleSound);
+
+// --- input: the ring arrives as an ordinary mouse --------------------------------
+
+cv.addEventListener("pointermove", (e) => {
+  G.aim.x = e.clientX;
+  G.aim.y = e.clientY;
+  G.aim.seen = true;
+});
+// ScreenOura clicks where the cursor was just before the tap jolted the ring: aim with the event's own spot.
+cv.addEventListener("pointerdown", (e) => { if (e.button === 0) shoot(e.clientX, e.clientY); });
+// One sweep arrives as a burst of scroll events: it reloads once. The page itself never scrolls.
+let quietUntil = 0;
+window.addEventListener("wheel", (e) => {
+  e.preventDefault();
+  const now = performance.now();
+  if (now > quietUntil) reload();
+  quietUntil = now + 500;
+}, { passive: false });
+window.addEventListener("keydown", (e) => {
+  if (e.repeat || e.metaKey || e.ctrlKey || e.altKey) return;
+  const key = e.key.toLowerCase();
+  const onControl = document.activeElement && document.activeElement.closest("button, a");
+  if (key === "m") toggleSound();
+  else if (key === "r") reload();
+  else if ((key === "escape" || key === "p") && (G.mode === "playing" || G.mode === "countdown")) pause("key");
+  else if ((key === " " || key === "enter") && !onControl) {
+    if (G.mode === "title" || (G.mode === "over" && clockNow() >= G.againAt)) startRound();
+    else if (G.mode === "paused") { fullScreen(); resume(); }  // the keyboard is deliberate: it resumes any pause
+    else return;
+  } else return;
+  e.preventDefault();
+});
+document.addEventListener("visibilitychange", () => { if (document.hidden) pause("hidden"); });
+document.addEventListener("fullscreenchange", () => { if (!document.fullscreenElement) pause("fullscreen"); });
+window.addEventListener("resize", resize);
+
+let last = performance.now();
+function frame(now) {
+  const dt = Math.min(0.05, (now - last) / 1000);
+  last = now;
+  update(dt);
+  draw(now / 1000);
+  renderHud();
+  requestAnimationFrame(frame);
+}
+
+resize();
+renderSound();
+show("title");
+listen();
+// Canvas text needs the web font loaded, or the first scores draw in the fallback face.
+Promise.race([document.fonts.ready, new Promise((r) => setTimeout(r, 1500))]).then(() => requestAnimationFrame(frame));
+</script>
+</body>
+</html>

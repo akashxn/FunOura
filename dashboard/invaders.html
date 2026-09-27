@@ -1,0 +1,749 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ring Invaders</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Host+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  /* Quick Draw's dark titanium, with the invaders in the ring's LED colours. */
+  :root {
+    --field: #171b1f;
+    --plate: #20262b;
+    --plate-hover: #2a3137;
+    --hair: #2b3239;
+    --ink: #e6eaee;
+    --ink-2: #a3adb7;
+    --ink-3: #7a848e;
+    --ti-1: #aeb6bd;
+    --pulse: #2aa874;
+    --warm: #bb8a24;
+    --oxy: #dc4f66;
+    --dock: #5a88ee;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    overflow: hidden;
+    background: var(--field);
+    color: var(--ink);
+    font: 400 15px/1.5 "Host Grotesk", ui-sans-serif, system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; cursor: none; touch-action: none; }
+  button, a { font: inherit; color: inherit; }
+  :focus-visible { outline: 2px solid var(--dock); outline-offset: 3px; border-radius: 6px; }
+  [hidden] { display: none !important; }
+
+  .screen { position: fixed; inset: 0; pointer-events: none; text-align: center; display: flex; flex-direction: column;
+            align-items: center; justify-content: center; padding: 16px; background: rgba(23,27,31,0.72); }
+  .screen a, .screen button { pointer-events: auto; }
+  h1 { margin: 0; font-size: clamp(56px, 9vw, 108px); font-weight: 700; letter-spacing: -0.045em; line-height: .92; }
+  h2 { margin: 0; font-weight: 700; letter-spacing: -0.035em; line-height: 1; font-size: 56px; }
+  .lede { margin: 16px auto 0; max-width: 40ch; color: var(--ink-2); font-size: 17px; }
+  .prompt { margin: 36px 0 0; color: var(--ink); font-size: 18px; font-weight: 600; }
+  .moves { display: inline-grid; grid-template-columns: repeat(3, minmax(0, auto)); gap: 10px 40px; margin: 36px 0 0; text-align: left; }
+  .moves dt { font-weight: 600; }
+  .moves dd { margin: 0; color: var(--ink-2); max-width: 18ch; }
+  .fine { margin: 18px 0 0; color: var(--ink-3); font-size: 14px; }
+  .final { font-size: clamp(72px, 11vw, 120px); font-variant-numeric: tabular-nums; }
+  .verdict { margin: 12px 0 0; color: var(--ink-2); }
+  .verdict.best { color: var(--pulse); font-weight: 600; }
+  .back { position: fixed; top: 22px; left: 28px; color: var(--ink-2); text-decoration: underline; text-underline-offset: 3px; }
+  .back:hover { color: var(--ink); }
+
+  .chip { position: fixed; left: 28px; bottom: 22px; display: flex; align-items: center; gap: 12px; max-width: calc(100vw - 190px);
+          color: var(--ink-2); font-size: 14px; text-align: left; }
+  .led { flex: none; width: 12px; height: 12px; border-radius: 50%; border: 1.5px solid var(--ink-3); }
+  .led[data-state="connecting"] { border-color: var(--dock); background: var(--dock); animation: blink 1s steps(2, jump-none) infinite; }
+  .led[data-state="running"] { border-color: var(--dock); background: color-mix(in srgb, var(--dock) 45%, transparent); }
+  .led[data-state="steering"] { border-color: var(--dock); background: var(--dock); box-shadow: 0 0 0 4px color-mix(in srgb, var(--dock) 22%, transparent); }
+  @keyframes blink { 50% { opacity: .25; } }
+  .btn { flex: none; border: 0; border-radius: 10px; padding: 8px 14px; background: var(--plate); color: var(--ink); cursor: pointer; font-weight: 500; }
+  .btn:hover:not(:disabled) { background: var(--plate-hover); }
+  .btn:disabled { opacity: .5; cursor: default; }
+  .sound { position: fixed; right: 28px; bottom: 22px; }
+  .sound[aria-pressed="false"] { color: var(--ink-3); }
+
+  @media (max-width: 760px) {
+    .moves { grid-template-columns: minmax(0, auto); }
+    .chip { left: 16px; right: 16px; bottom: 16px; max-width: none; flex-wrap: wrap; }
+    .sound { right: 16px; top: 12px; bottom: auto; }
+    .back { left: 16px; top: 16px; }
+  }
+  @media (prefers-reduced-motion: reduce) { .led[data-state="connecting"] { animation: none; } }
+</style>
+</head>
+<body>
+<canvas id="field" aria-label="Ring Invaders"></canvas>
+
+<section class="screen" id="titleScreen">
+  <a class="back" href="/">Back to the dashboard</a>
+  <h1>Ring Invaders</h1>
+  <p class="lede">Hold the line. Clear a wave and the next one comes quicker and lower. Three ships.</p>
+  <p class="prompt">Tap to start</p>
+  <dl class="moves">
+    <div><dt>Move</dt><dd>Tilt your hand left and right</dd></div>
+    <div><dt>Fire</dt><dd>Tap your thumb on your index finger</dd></div>
+    <div><dt>Pause</dt><dd>Palm up for a second</dd></div>
+  </dl>
+  <p class="fine" id="bestTitle">No ring? A/D or the arrow keys and Space work too. Esc leaves full screen.</p>
+</section>
+
+<section class="screen" id="pauseScreen" hidden>
+  <h2>Paused</h2>
+  <p class="lede" id="pauseWhy"></p>
+  <p class="prompt" id="pausePrompt">Tap to carry on</p>
+</section>
+
+<section class="screen" id="overScreen" hidden>
+  <a class="back" href="/">Back to the dashboard</a>
+  <p class="lede" id="overWhy">Game over</p>
+  <h2 class="final" id="finalScore">0</h2>
+  <p class="verdict" id="verdict"></p>
+  <p class="fine" id="overStats"></p>
+  <p class="prompt" id="againPrompt">Tap to play again</p>
+</section>
+
+<div class="chip" id="chip">
+  <span class="led" id="chipLed" aria-hidden="true"></span>
+  <span id="chipText">Looking for ScreenOura…</span>
+  <button class="btn" id="chipStart" hidden>Start ScreenOura</button>
+</div>
+<button class="btn sound" id="soundBtn" aria-pressed="true">Sound on</button>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const css = getComputedStyle(document.documentElement);
+const token = (name) => css.getPropertyValue(name).trim();
+const BAND = [0.12, 0.88];   // the cursor's useful range: the ship reaches both walls well before the screen edge
+const INK = token("--ink"), INK2 = token("--ink-2"), INK3 = token("--ink-3"), HAIR = token("--hair"), DOCK = token("--dock"),
+      PULSE = token("--pulse"), OXY = token("--oxy"), WARM = token("--warm"), TI = token("--ti-1");
+const clamp = (v, lo, hi) => Math.min(Math.max(v, lo), hi);
+const store = {
+  get(k, fallback) { try { const v = localStorage.getItem(k); return v === null ? fallback : JSON.parse(v); } catch { return fallback; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* private window: fine */ } },
+};
+const now = () => performance.now() / 1000;
+
+// --- pixel art ---------------------------------------------------------------------
+
+const art = (rows) => rows.map((r) => [...r].map((c) => c === "X"));
+const SPRITES = {
+  squid: [art(["...XX...", "..XXXX..", ".XXXXXX.", "XX.XX.XX", "XXXXXXXX", "..X..X..", ".X.XX.X.", "X.X..X.X"]),
+          art(["...XX...", "..XXXX..", ".XXXXXX.", "XX.XX.XX", "XXXXXXXX", ".X.XX.X.", "X......X", ".X....X."])],
+  crab: [art(["..X.....X..", "...X...X...", "..XXXXXXX..", ".XX.XXX.XX.", "XXXXXXXXXXX", "X.XXXXXXX.X", "X.X.....X.X", "...XX.XX..."]),
+         art(["..X.....X..", "X..X...X..X", "X.XXXXXXX.X", "XXX.XXX.XXX", "XXXXXXXXXXX", ".XXXXXXXXX.", "..X.....X..", ".X.......X."])],
+  octopus: [art(["....XXXX....", ".XXXXXXXXXX.", "XXXXXXXXXXXX", "XXX..XX..XXX", "XXXXXXXXXXXX", "...XX..XX...", "..XX.XX.XX..", "XX........XX"]),
+            art(["....XXXX....", ".XXXXXXXXXX.", "XXXXXXXXXXXX", "XXX..XX..XXX", "XXXXXXXXXXXX", "..XXX..XXX..", ".XX..XX..XX.", "..XX....XX.."])],
+  ship: art([".....X.....", "....XXX....", "....XXX....", ".XXXXXXXXX.", "XXXXXXXXXXX", "XXXXXXXXXXX", "XXXXXXXXXXX"]),
+  ufo: art([".....XXXXXX.....", "...XXXXXXXXXX...", "..XXXXXXXXXXXX..", ".XX.XX.XX.XX.XX.", "XXXXXXXXXXXXXXXX", "..XXX..XX..XXX..", "...X........X..."]),
+};
+const ROWS = [["squid", 30, OXY], ["crab", 20, WARM], ["crab", 20, WARM], ["octopus", 10, PULSE], ["octopus", 10, PULSE]];
+const COLS = 10;
+
+function sprite(grid, x, y, u, color) {
+  ctx.fillStyle = color;
+  for (let r = 0; r < grid.length; r++) {
+    const row = grid[r];
+    for (let c = 0; c < row.length; c++) if (row[c]) ctx.fillRect(x + c * u, y + r * u, u + 0.5, u + 0.5);
+  }
+}
+
+// --- the field ---------------------------------------------------------------------
+
+const cv = $("field"), ctx = cv.getContext("2d");
+let W = 0, H = 0, u = 4;   // u: one pixel of the pixel art, in screen pixels
+const L = {};              // layout, from the window size
+
+function resize() {
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const oldW = W || window.innerWidth;
+  W = window.innerWidth;
+  H = window.innerHeight;
+  cv.width = Math.round(W * dpr);
+  cv.height = Math.round(H * dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const oldU = u;
+  u = Math.max(2, Math.floor(Math.min(W / 220, H / 140)));
+  Object.assign(L, { top: H * 0.1, shipY: H * 0.9 - 7 * u, margin: W * 0.05, cellW: 16 * u, cellH: 12 * u });
+  L.bunkerY = L.shipY - 30 * u;
+  G.ship.x = G.ship.x ? G.ship.x * W / oldW : W / 2;
+  G.ship.target = G.ship.x;
+  if (oldU !== u && G.mode !== "title") { G.form.x *= u / oldU; G.form.y = L.top + (G.form.y - L.top) * u / oldU; makeBunkers(); }
+}
+
+const G = {
+  mode: "title",          // title | ready | playing | paused | over
+  score: 0, lives: 3, wave: 1, shots: 0, hits: 0, extra: false,
+  ship: { x: 0, target: 0, deadUntil: 0 },
+  form: { x: 0, y: 0, dir: 1, stepAt: 0, frame: 0, alive: [] },
+  bullets: [], bombs: [], bunkers: [], bits: [], ufo: null, ufoAt: 0, bombAt: 0, lastShot: 0,
+  readyAt: 0, readyText: "", pause: null, ringPlay: false, againAt: 0, overAt: 0, march: 0,
+  keys: { left: false, right: false },
+  best: store.get("invaders.best", 0),
+};
+
+function fullScreen() {
+  if (!document.fullscreenElement && document.documentElement.requestFullscreen) {
+    document.documentElement.requestFullscreen().catch(() => {});
+  }
+}
+
+function startGame() {
+  Sound.wake();
+  fullScreen();
+  Object.assign(G, { score: 0, lives: 3, wave: 1, shots: 0, hits: 0, extra: false, pause: null, overAt: 0 });
+  G.ringPlay = ring.running && ring.connected && ring.steering;
+  newWave();
+}
+
+function newWave() {
+  const f = G.form;
+  f.alive = ROWS.map(() => Array(COLS).fill(true));
+  f.x = (W - COLS * L.cellW) / 2;
+  f.y = L.top + 14 * u + Math.min(G.wave - 1, 4) * 4 * u;  // each wave starts a step lower
+  f.dir = 1;
+  f.frame = 0;
+  G.bullets = []; G.bombs = []; G.ufo = null;
+  G.ufoAt = now() + 16 + Math.random() * 10;
+  makeBunkers();
+  ready(`Wave ${G.wave}`, 1.4);
+}
+
+function ready(text, wait) {
+  G.readyText = text;
+  G.readyAt = now() + wait;
+  show("ready");
+}
+
+// Four bunkers in the classic shape, 22×16 art pixels each; shots chip them away.
+function makeBunkers() {
+  G.bunkers = [];
+  for (let i = 0; i < 4; i++) {
+    const cells = [];
+    for (let r = 0; r < 16; r++) for (let c = 0; c < 22; c++) {
+      const corner = r < 4 && (c < 4 - r || c > 17 + r);
+      const arch = (r >= 12 && c >= 6 && c < 16) || (r === 11 && c >= 7 && c < 15);
+      cells.push(!corner && !arch);
+    }
+    G.bunkers.push({ x: W * (i + 1) / 5 - 11 * u, y: L.bunkerY, cells });
+  }
+}
+
+// Knock a ragged hole where something hit a bunker. Returns true if anything was there.
+function bunkerHit(x, y, radius = 2) {
+  for (const b of G.bunkers) {
+    const c = Math.floor((x - b.x) / u), r = Math.floor((y - b.y) / u);
+    if (c < 0 || c >= 22 || r < 0 || r >= 16 || !b.cells[r * 22 + c]) continue;
+    for (let dr = -radius; dr <= radius; dr++) for (let dc = -radius; dc <= radius; dc++) {
+      const rr = r + dr, cc = c + dc;
+      if (rr >= 0 && rr < 16 && cc >= 0 && cc < 22 && Math.hypot(dr, dc) <= radius + Math.random() * 0.8) b.cells[rr * 22 + cc] = false;
+    }
+    return true;
+  }
+  return false;
+}
+
+function invaderBox(r, c) {
+  const kind = ROWS[r][0], w = SPRITES[kind][0][0].length * u;
+  return { x: G.form.x + c * L.cellW + (L.cellW - w) / 2, y: G.form.y + r * L.cellH, w, h: 8 * u };
+}
+
+function aliveCount() { return G.form.alive.reduce((n, row) => n + row.filter(Boolean).length, 0); }
+
+function fire() {
+  const t = now();
+  if (G.mode !== "playing" || t < G.ship.deadUntil || t - G.lastShot < 0.22 || G.bullets.length >= 2) return;
+  G.lastShot = t;
+  G.shots++;
+  G.bullets.push({ x: G.ship.x, y: L.shipY - u });
+  Sound.shoot();
+}
+
+function burst(x, y, color, n = 14) {
+  for (let i = 0; i < n; i++) {
+    const a = Math.random() * Math.PI * 2, s = (0.3 + Math.random()) * H * 0.25;
+    G.bits.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: 0.5 + Math.random() * 0.3, color });
+  }
+}
+
+function addScore(n) {
+  G.score += n;
+  if (!G.extra && G.score >= 1500) { G.extra = true; G.lives++; Sound.extra(); }
+}
+
+function loseShip() {
+  burst(G.ship.x, L.shipY + 3 * u, DOCK, 28);
+  Sound.boom();
+  G.lives--;
+  G.bombs = [];
+  if (G.lives <= 0) { G.overAt = now() + 1.2; G.ship.deadUntil = Infinity; }
+  else G.ship.deadUntil = now() + 1.6;
+}
+
+function endGame(reason) {
+  const best = G.score > G.best && G.score > 0;
+  if (best) { G.best = G.score; store.set("invaders.best", G.best); }
+  $("overWhy").textContent = reason;
+  $("finalScore").textContent = G.score.toLocaleString();
+  $("verdict").textContent = best ? "Your best yet" : G.best ? `Your best is ${G.best.toLocaleString()}` : "";
+  $("verdict").classList.toggle("best", best);
+  $("overStats").textContent = `Reached wave ${G.wave} · ${G.shots ? Math.round(100 * G.hits / G.shots) : 0}% of shots hit`;
+  G.againAt = now() + 1.2;
+  $("againPrompt").style.visibility = "hidden";
+  setTimeout(() => { $("againPrompt").style.visibility = ""; }, 1200);
+  Sound.end();
+  show("over");
+}
+
+function pause(reason) {
+  if (G.mode !== "playing" && G.mode !== "ready") return;
+  G.pause = { reason, was: G.mode, left: G.readyAt - now() };
+  $("pauseWhy").textContent = {
+    steering: "Steering is paused. Palm up for a second to carry on.",
+    stopped: "ScreenOura stopped. Start it again below, or carry on with the keys.",
+    hidden: "The game stops while you can't see it.",
+    fullscreen: "You left full screen.",
+    key: "Take your time.",
+  }[reason];
+  $("pausePrompt").hidden = reason === "steering";
+  show("paused");
+}
+
+function resume() {
+  if (G.mode !== "paused") return;
+  const p = G.pause;
+  G.pause = null;
+  G.ringPlay = ring.running && ring.connected && ring.steering;
+  if (p.was === "ready") ready(G.readyText, Math.max(p.left, 0.8));
+  else ready("Ready", 0.8);
+}
+
+function show(mode) {
+  G.mode = mode;
+  $("titleScreen").hidden = mode !== "title";
+  $("pauseScreen").hidden = mode !== "paused";
+  $("overScreen").hidden = mode !== "over";
+  // during a game every tap is a real click: nothing clickable may sit under the cursor
+  const calm = mode === "title" || mode === "paused" || mode === "over";
+  $("chip").hidden = !calm;
+  $("soundBtn").hidden = !calm;
+  if (mode === "title" && G.best) $("bestTitle").textContent = `Your best is ${G.best.toLocaleString()}. A/D or the arrow keys and Space work too. Esc leaves full screen.`;
+}
+
+// --- each frame --------------------------------------------------------------------
+
+function update(dt) {
+  const t = now(), s = G.ship, half = 5.5 * u;
+  if (G.keys.left || G.keys.right) s.target += (G.keys.right - G.keys.left) * W * 0.6 * dt;
+  s.target = clamp(s.target, L.margin + half, W - L.margin - half);
+  s.x += (s.target - s.x) * Math.min(1, dt * 22);
+
+  for (const b of G.bits) { b.x += b.vx * dt; b.y += b.vy * dt; b.vy += H * 0.5 * dt; b.life -= dt; }
+  G.bits = G.bits.filter((b) => b.life > 0);
+
+  if (G.mode === "ready") { if (t >= G.readyAt) show("playing"); return; }
+  if (G.mode !== "playing") return;
+  if (G.overAt && t >= G.overAt) { endGame("Game over"); return; }
+
+  const f = G.form, alive = aliveCount(), total = ROWS.length * COLS;
+  if (alive === 0) { G.wave++; newWave(); return; }
+  const frozen = t < s.deadUntil;
+
+  // the march: one step at a time, quicker as the ranks thin and the waves go on
+  if (!frozen && t >= f.stepAt) {
+    const pace = (0.025 + 0.55 * (alive / total) ** 1.3) / (1 + 0.12 * (G.wave - 1));
+    f.stepAt = t + pace;
+    let lo = Infinity, hi = -Infinity, bottom = 0;
+    f.alive.forEach((row, r) => row.forEach((on, c) => {
+      if (!on) return;
+      const bx = invaderBox(r, c);
+      lo = Math.min(lo, bx.x); hi = Math.max(hi, bx.x + bx.w); bottom = Math.max(bottom, bx.y + bx.h);
+    }));
+    const dx = 2 * u * f.dir;
+    if (hi + dx > W - L.margin || lo + dx < L.margin) { f.y += 4 * u; f.dir *= -1; }
+    else f.x += dx;
+    f.frame ^= 1;
+    Sound.march(G.march++ % 4);
+    if (bottom >= L.shipY) { G.lives = 0; burst(s.x, L.shipY, DOCK, 28); Sound.boom(); endGame("They landed"); return; }
+    // invaders crush any bunker they walk into
+    if (bottom >= L.bunkerY) f.alive.forEach((row, r) => row.forEach((on, c) => {
+      if (!on) return;
+      const bx = invaderBox(r, c);
+      for (let y = bx.y; y < bx.y + bx.h; y += u) for (let x = bx.x; x < bx.x + bx.w; x += u) bunkerHit(x, y, 0);
+    }));
+  }
+
+  // bombs from the lowest invader in a random column
+  if (!frozen && t >= G.bombAt && G.bombs.length < 2 + G.wave) {
+    G.bombAt = t + (0.5 + Math.random() * 0.9) / (1 + 0.15 * (G.wave - 1));
+    const cols = [...Array(COLS).keys()].filter((c) => f.alive.some((row) => row[c]));
+    const c = cols[Math.floor(Math.random() * cols.length)];
+    let r = ROWS.length - 1;
+    while (!f.alive[r][c]) r--;
+    const bx = invaderBox(r, c);
+    G.bombs.push({ x: bx.x + bx.w / 2, y: bx.y + bx.h, color: ROWS[r][2] });
+  }
+
+  // the saucer
+  if (!G.ufo && !frozen && t >= G.ufoAt) {
+    const dir = Math.random() < 0.5 ? 1 : -1;
+    G.ufo = { x: dir > 0 ? -16 * u : W + 16 * u, dir, value: [50, 100, 150, 300][Math.floor(Math.random() * 4)] };
+    Sound.ufo();
+  }
+  if (G.ufo) {
+    G.ufo.x += G.ufo.dir * W * 0.13 * dt;
+    if (G.ufo.x < -20 * u || G.ufo.x > W + 20 * u) { G.ufo = null; G.ufoAt = t + 18 + Math.random() * 10; }
+  }
+
+  // your shots: checked a pixel at a time so they can't skip through anything
+  const shotSpeed = H * 1.25;
+  G.bullets = G.bullets.filter((b) => {
+    for (let moved = 0; moved < shotSpeed * dt; moved += u) {
+      b.y -= u;
+      if (b.y < L.top - 4 * u) return false;
+      if (bunkerHit(b.x, b.y, 1)) return false;
+      for (let r = 0; r < ROWS.length; r++) for (let c = 0; c < COLS; c++) {
+        if (!f.alive[r][c]) continue;
+        const bx = invaderBox(r, c);
+        if (b.x >= bx.x && b.x <= bx.x + bx.w && b.y >= bx.y && b.y <= bx.y + bx.h) {
+          f.alive[r][c] = false;
+          G.hits++;
+          addScore(ROWS[r][1]);
+          burst(bx.x + bx.w / 2, bx.y + bx.h / 2, ROWS[r][2]);
+          Sound.hit();
+          return false;
+        }
+      }
+      const o = G.ufo;
+      if (o && b.x >= o.x - 8 * u && b.x <= o.x + 8 * u && b.y >= L.top && b.y <= L.top + 7 * u) {
+        G.hits++;
+        addScore(o.value);
+        burst(o.x, L.top + 3 * u, OXY, 24);
+        G.bits.push({ x: o.x, y: L.top + 3 * u, vx: 0, vy: -H * 0.05, life: 1.2, text: String(o.value) });
+        G.ufo = null;
+        G.ufoAt = t + 18 + Math.random() * 10;
+        Sound.ufoHit();
+        return false;
+      }
+      for (const m of G.bombs) {
+        if (Math.abs(m.x - b.x) < 2 * u && Math.abs(m.y - b.y) < 4 * u) { m.gone = true; burst(b.x, b.y, INK3, 6); return false; }
+      }
+    }
+    return true;
+  });
+
+  // their bombs
+  const bombSpeed = H * (0.3 + 0.03 * (G.wave - 1));
+  G.bombs = G.bombs.filter((m) => {
+    if (m.gone) return false;
+    for (let moved = 0; moved < bombSpeed * dt; moved += u) {
+      m.y += u;
+      if (bunkerHit(m.x, m.y + 3 * u, 2)) return false;
+      if (!frozen && Math.abs(m.x - s.x) <= 5.5 * u && m.y + 3 * u >= L.shipY + u && m.y <= L.shipY + 7 * u) { loseShip(); return false; }
+      if (m.y > H) return false;
+    }
+    return true;
+  });
+}
+
+// --- drawing -----------------------------------------------------------------------
+
+function draw() {
+  const t = now();
+  ctx.fillStyle = token("--field");
+  ctx.fillRect(0, 0, W, H);
+
+  // readouts along the top
+  ctx.textBaseline = "middle";
+  ctx.font = `600 ${Math.round(Math.max(16, H * 0.032))}px "Host Grotesk", system-ui, sans-serif`;
+  const hudY = L.top * 0.5;
+  if (G.mode !== "title") {
+    ctx.fillStyle = INK;
+    ctx.textAlign = "left";
+    ctx.fillText(G.score.toLocaleString(), L.margin, hudY);
+    ctx.textAlign = "center";
+    ctx.fillStyle = INK3;
+    ctx.fillText(`Wave ${G.wave}`, W / 2, hudY);
+    const mini = Math.max(2, Math.round(u * 0.6));
+    for (let i = 0; i < Math.max(0, G.lives - 1); i++) sprite(SPRITES.ship, W - L.margin - (i + 1) * 14 * mini, hudY - 3.5 * mini, mini, DOCK);
+  }
+  ctx.fillStyle = HAIR;
+  ctx.fillRect(0, L.shipY + 9 * u, W, 2);
+
+  if (G.mode === "title") return drawTitle(t);
+
+  // bunkers
+  ctx.fillStyle = TI;
+  ctx.globalAlpha = 0.75;
+  for (const b of G.bunkers) for (let i = 0; i < b.cells.length; i++) {
+    if (b.cells[i]) ctx.fillRect(b.x + (i % 22) * u, b.y + Math.floor(i / 22) * u, u + 0.5, u + 0.5);
+  }
+  ctx.globalAlpha = 1;
+
+  // invaders
+  G.form.alive.forEach((row, r) => row.forEach((on, c) => {
+    if (!on) return;
+    const bx = invaderBox(r, c);
+    sprite(SPRITES[ROWS[r][0]][G.form.frame], bx.x, bx.y, u, ROWS[r][2]);
+  }));
+  if (G.ufo) sprite(SPRITES.ufo, G.ufo.x - 8 * u, L.top, u, OXY);
+
+  // shots and bombs
+  ctx.fillStyle = INK;
+  for (const b of G.bullets) ctx.fillRect(b.x - u * 0.4, b.y, u * 0.8, 4 * u);
+  for (const m of G.bombs) {
+    ctx.fillStyle = m.color;
+    const wig = Math.floor(m.y / (2 * u)) % 2 ? u : 0;  // a little zig-zag as it falls
+    for (let k = 0; k < 3; k++) ctx.fillRect(m.x - u + ((k % 2) ? wig : u - wig), m.y + k * 2 * u, u, 2 * u);
+  }
+
+  // the ship, blinking while it comes back
+  const dead = t < G.ship.deadUntil;
+  if (!dead || (G.ship.deadUntil !== Infinity && G.ship.deadUntil - t < 0.6 && Math.floor(t * 10) % 2)) {
+    sprite(SPRITES.ship, G.ship.x - 5.5 * u, L.shipY, u, DOCK);
+  }
+
+  for (const b of G.bits) {
+    ctx.globalAlpha = clamp(b.life * 2, 0, 1);
+    if (b.text) { ctx.fillStyle = OXY; ctx.textAlign = "center"; ctx.fillText(b.text, b.x, b.y); }
+    else { ctx.fillStyle = b.color; ctx.fillRect(b.x, b.y, u, u); }
+  }
+  ctx.globalAlpha = 1;
+
+  if (G.mode === "ready") {
+    ctx.textAlign = "center";
+    ctx.fillStyle = INK;
+    ctx.font = `700 ${Math.round(H * 0.07)}px "Host Grotesk", system-ui, sans-serif`;
+    ctx.fillText(G.readyText, W / 2, (L.bunkerY + G.form.y + ROWS.length * L.cellH) / 2);
+  }
+}
+
+function drawTitle(t) {
+  // three invaders across the bottom, marching on the spot, with what they're worth
+  const kinds = [["squid", 30, OXY], ["crab", 20, WARM], ["octopus", 10, PULSE]];
+  ctx.textAlign = "center";
+  ctx.font = `500 ${Math.round(Math.max(13, H * 0.02))}px "Host Grotesk", system-ui, sans-serif`;
+  kinds.forEach(([kind, pts, color], i) => {
+    const x = W / 2 + (i - 1) * 16 * u * 1.6, y = H * 0.1;
+    const grid = SPRITES[kind][Math.floor(t * 2) % 2];
+    sprite(grid, x - grid[0].length * u / 2, y - 4 * u, u, color);
+    ctx.fillStyle = INK3;
+    ctx.fillText(`${pts}`, x, y + 8 * u);
+  });
+}
+
+// --- ScreenOura, from the dashboard's live updates (as in Quick Draw) -----------------
+
+const ring = { present: false, running: false, connected: false, steering: false, stopping: false, busy: null, error: "" };
+
+function listen() {
+  if (location.protocol === "file:") { renderChip(); return; }
+  const es = new EventSource("/api/stream");
+  es.onopen = () => { ring.present = true; renderChip(); };
+  es.onerror = () => { ring.present = false; ring.running = false; renderChip(); };
+  es.onmessage = (e) => {
+    const m = JSON.parse(e.data);
+    if (m.type === "state") {
+      ring.busy = m.busy;
+      ring.running = m.busy === "screenoura";
+      screenFields(m.screenoura);
+    } else if (m.type === "busy") {
+      ring.busy = m.what;
+      ring.running = m.what === "screenoura";
+      if (ring.running) ring.error = "";
+      else screenFields({});
+    } else if (m.type === "screen") {
+      screenFields(m);
+    } else if (m.type === "error" && m.name === "screenoura") {
+      ring.error = m.message;
+    } else {
+      return;
+    }
+    ringChanged();
+  };
+}
+
+function screenFields(s) {
+  ring.connected = Boolean(s && s.connected);
+  ring.steering = Boolean(s && s.steering);
+  ring.stopping = Boolean(s && s.stopping);
+}
+
+function ringChanged() {
+  const steering = ring.running && ring.connected && ring.steering && !ring.stopping;
+  if (G.ringPlay && (G.mode === "playing" || G.mode === "ready")) {
+    if (!ring.running || ring.stopping) pause("stopped");
+    else if (ring.connected && !ring.steering) pause("steering");  // palm up: the pause gesture
+  } else if (G.mode === "paused" && G.pause.reason === "steering") {
+    if (steering) resume();
+    else if (!ring.running || ring.stopping) {
+      G.pause.reason = "stopped";
+      $("pauseWhy").textContent = "ScreenOura stopped. Start it again below, or carry on with the keys.";
+      $("pausePrompt").hidden = false;
+    }
+  }
+  renderChip();
+}
+
+function renderChip() {
+  let state = "off", text;
+  if (!ring.present) {
+    text = location.protocol === "file:" ? "Open this from the dashboard to play with the ring. The keys work too."
+      : "Can't reach the dashboard, so the ring is out for now. The keys work.";
+  } else if (!ring.running) {
+    text = ring.error || (ring.busy ? "The ring is busy with a reading. The keys work meanwhile."
+      : "Hands Free is off. Start it to play with the ring.");
+  } else if (ring.stopping) {
+    state = "connecting"; text = "Hands Free is stopping…";
+  } else if (!ring.connected) {
+    state = "connecting"; text = "Hands Free is connecting to the ring…";
+  } else if (ring.steering) {
+    state = "steering"; text = ring.error || "Hands Free is steering. Tilt to move, tap to fire.";
+  } else {
+    state = "running"; text = "Hands Free is paused. Palm up for a second to steer.";
+  }
+  $("chipLed").dataset.state = state;
+  $("chipText").textContent = text;
+  $("chipStart").hidden = !(ring.present && !ring.running && !ring.busy);
+}
+
+$("chipStart").addEventListener("click", async (e) => {
+  e.stopPropagation();
+  const b = $("chipStart");
+  ring.error = "";
+  b.disabled = true;
+  try {
+    const r = await fetch("/api/screenoura/start", { method: "POST", body: "{}",
+      headers: { "X-Oura-Play": "1", "Content-Type": "application/json" } });
+    if (!r.ok) ring.error = (await r.json()).error || "Hands Free didn't start.";
+  } catch {
+    ring.error = "The dashboard server isn't answering.";
+  }
+  b.disabled = false;
+  renderChip();
+});
+
+// --- sound -------------------------------------------------------------------------
+
+const Sound = {
+  ac: null,
+  noise: null,
+  on: store.get("invaders.sound", true),
+  wake() {
+    if (!this.ac) {
+      try { this.ac = new (window.AudioContext || window.webkitAudioContext)(); } catch { return; }
+    }
+    if (this.ac.state === "suspended") this.ac.resume();
+  },
+  tone(freq, dur, { type = "sine", gain = 0.12, to = null, delay = 0 } = {}) {
+    const ac = this.ac;
+    if (!ac || !this.on) return;
+    const t = ac.currentTime + delay, osc = ac.createOscillator(), env = ac.createGain();
+    osc.type = type;
+    osc.frequency.setValueAtTime(freq, t);
+    if (to) osc.frequency.exponentialRampToValueAtTime(to, t + dur);
+    env.gain.setValueAtTime(0.0001, t);
+    env.gain.exponentialRampToValueAtTime(gain, t + 0.006);
+    env.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    osc.connect(env).connect(ac.destination);
+    osc.start(t);
+    osc.stop(t + dur + 0.03);
+  },
+  hiss(dur, { gain = 0.2, from = 2400, to = 400 } = {}) {
+    const ac = this.ac;
+    if (!ac || !this.on) return;
+    if (!this.noise) {
+      this.noise = ac.createBuffer(1, ac.sampleRate / 2, ac.sampleRate);
+      const d = this.noise.getChannelData(0);
+      for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    }
+    const t = ac.currentTime, src = ac.createBufferSource(), filter = ac.createBiquadFilter(), env = ac.createGain();
+    src.buffer = this.noise;
+    filter.type = "lowpass";
+    filter.frequency.setValueAtTime(from, t);
+    filter.frequency.exponentialRampToValueAtTime(to, t + dur);
+    env.gain.setValueAtTime(gain, t);
+    env.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    src.connect(filter).connect(env).connect(ac.destination);
+    src.start(t);
+    src.stop(t + dur + 0.03);
+  },
+  shoot() { this.tone(1200, 0.09, { type: "square", gain: 0.035, to: 400 }); },
+  hit() { this.hiss(0.18, { gain: 0.14, from: 3000, to: 300 }); },
+  boom() { this.hiss(0.6, { gain: 0.25, from: 1500, to: 80 }); this.tone(110, 0.5, { type: "triangle", gain: 0.12, to: 40 }); },
+  march(i) { this.tone([98, 87, 78, 73][i], 0.09, { type: "square", gain: 0.05 }); },
+  ufo() { for (let k = 0; k < 6; k++) this.tone(880, 0.12, { gain: 0.03, to: 1320, delay: k * 0.14 }); },
+  ufoHit() { this.tone(660, 0.1, { gain: 0.1 }); this.tone(990, 0.1, { gain: 0.1, delay: 0.09 }); this.tone(1320, 0.18, { gain: 0.08, delay: 0.18 }); },
+  extra() { this.tone(1046, 0.12, { type: "triangle", gain: 0.1 }); this.tone(1568, 0.2, { type: "triangle", gain: 0.1, delay: 0.1 }); },
+  end() { this.tone(392, 0.2, { type: "triangle", gain: 0.1 }); this.tone(262, 0.4, { type: "triangle", gain: 0.1, delay: 0.2 }); },
+};
+
+function renderSound() {
+  $("soundBtn").textContent = Sound.on ? "Sound on" : "Sound off";
+  $("soundBtn").setAttribute("aria-pressed", String(Sound.on));
+}
+function toggleSound() {
+  Sound.on = !Sound.on;
+  store.set("invaders.sound", Sound.on);
+  Sound.wake();
+  renderSound();
+}
+$("soundBtn").addEventListener("click", (e) => { e.stopPropagation(); toggleSound(); });
+
+// --- input: the ring arrives as an ordinary mouse ------------------------------------
+
+function tap() {
+  if (G.mode === "title" || (G.mode === "over" && now() >= G.againAt)) startGame();
+  else if (G.mode === "paused" && G.pause.reason !== "steering") { fullScreen(); resume(); }
+  else fire();
+}
+
+cv.addEventListener("pointermove", (e) => {
+  const f = clamp((e.clientX / W - BAND[0]) / (BAND[1] - BAND[0]), 0, 1);
+  G.ship.target = L.margin + 5.5 * u + f * (W - 2 * L.margin - 11 * u);
+});
+cv.addEventListener("pointerdown", (e) => { if (e.button === 0) tap(); });
+window.addEventListener("wheel", (e) => e.preventDefault(), { passive: false });
+const KEYS = { a: "left", arrowleft: "left", d: "right", arrowright: "right" };
+window.addEventListener("keydown", (e) => {
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  const key = e.key.toLowerCase();
+  if (KEYS[key]) { G.keys[KEYS[key]] = true; e.preventDefault(); return; }
+  const onControl = document.activeElement && document.activeElement.closest("button, a");
+  if (key === " " && !onControl) { e.preventDefault(); if (!e.repeat || G.mode === "playing") tap(); return; }
+  if (e.repeat) return;
+  if (key === "m") toggleSound();
+  else if (key === "escape" || key === "p") pause("key");
+  else if (key === "enter" && !onControl) tap();
+  else return;
+  e.preventDefault();
+});
+window.addEventListener("keyup", (e) => { const k = KEYS[e.key.toLowerCase()]; if (k) G.keys[k] = false; });
+document.addEventListener("visibilitychange", () => { if (document.hidden) pause("hidden"); });
+document.addEventListener("fullscreenchange", () => { if (!document.fullscreenElement) pause("fullscreen"); });
+window.addEventListener("resize", resize);
+
+let last = performance.now();
+function frame(t) {
+  const dt = Math.min(0.05, (t - last) / 1000);
+  last = t;
+  update(dt);
+  draw();
+  requestAnimationFrame(frame);
+}
+
+resize();
+renderSound();
+show("title");
+listen();
+Promise.race([document.fonts.ready, new Promise((r) => setTimeout(r, 1500))]).then(() => requestAnimationFrame(frame));
+</script>
+</body>
+</html>

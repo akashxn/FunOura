@@ -1,0 +1,134 @@
+diff --git a/crates/oura-cli/src/main.rs b/crates/oura-cli/src/main.rs
+index a567125..64961f5 100644
+--- a/crates/oura-cli/src/main.rs
++++ b/crates/oura-cli/src/main.rs
+@@ -91,6 +91,10 @@ enum Command {
+     Accel {
+         #[arg(long, default_value_t = 15)]
+         seconds: u64,
++        /// Print every sample to stdout as a JSON line (`{"t_ms":…,"x":…,"y":…,"z":…}`)
++        /// for piping into another program; status messages go to stderr.
++        #[arg(long)]
++        jsonl: bool,
+     },
+     /// Ask the ring to run sleep analysis (so it emits hypnogram/summary events).
+     SleepAnalyze {
+@@ -258,7 +262,7 @@ async fn main() -> Result<()> {
+         Command::Sync { sync_time } => cmd_sync(&cli, &key, *sync_time).await,
+         Command::Latest => cmd_latest(&cli, &key).await,
+         Command::LiveHr { seconds, raw } => cmd_live_hr(&cli, &key, *seconds, *raw).await,
+-        Command::Accel { seconds } => cmd_accel(&cli, &key, *seconds).await,
++        Command::Accel { seconds, jsonl } => cmd_accel(&cli, &key, *seconds, *jsonl).await,
+         Command::SleepAnalyze { force } => cmd_sleep_analyze(&cli, &key, *force).await,
+         Command::Rdata { action } => cmd_rdata(&cli, &key, action).await,
+         Command::Events => cmd_events(&cli).await,
+@@ -771,38 +775,79 @@ async fn cmd_sleep_analyze(cli: &Cli, key: &Option<[u8; 16]>, force: bool) -> Re
+     Ok(())
+ }
+ 
+-async fn cmd_accel(cli: &Cli, key: &Option<[u8; 16]>, seconds: u64) -> Result<()> {
++async fn cmd_accel(cli: &Cli, key: &Option<[u8; 16]>, seconds: u64, jsonl: bool) -> Result<()> {
++    use oura_link::transport::Transport;
++    use std::io::Write;
++
+     let client = connect(cli).await?;
+     maybe_auth(&client, key).await?;
+ 
+-    println!("Streaming accelerometer for {seconds}s — wave your hand!");
++    if jsonl {
++        eprintln!("Streaming accelerometer for {seconds}s as JSON lines");
++    } else {
++        println!("Streaming accelerometer for {seconds}s — wave your hand!");
++    }
++    let start = std::time::Instant::now();
++    let mut out = std::io::stdout();
++    // The reader closing the pipe ends the stream, just like Ctrl-C.
++    let (stop_tx, mut stop_rx) = tokio::sync::mpsc::unbounded_channel::<()>();
+     let mut count = 0u32;
+     let mut mags: Vec<f64> = Vec::new();
+-    client
+-        .stream_accelerometer(Duration::from_secs(seconds), |s| {
+-            count += 1;
+-            let m = s.magnitude();
+-            mags.push(m);
+-            if count.is_multiple_of(10) {
+-                println!("  x={:>6} y={:>6} z={:>6}  |a|={:.0}", s.x, s.y, s.z, m);
++    let stream = client.stream_accelerometer(Duration::from_secs(seconds), |s| {
++        count += 1;
++        let m = s.magnitude();
++        mags.push(m);
++        if jsonl {
++            let t_ms = start.elapsed().as_millis();
++            let line = format!(r#"{{"t_ms":{t_ms},"x":{},"y":{},"z":{}}}"#, s.x, s.y, s.z);
++            if writeln!(out, "{line}").is_err() {
++                let _ = stop_tx.send(());
+             }
+-        })
+-        .await?;
++        } else if count.is_multiple_of(10) {
++            println!("  x={:>6} y={:>6} z={:>6}  |a|={:.0}", s.x, s.y, s.z, m);
++        }
++    });
++    // Closing the terminal sends SIGHUP and `kill` sends SIGTERM; treat both like Ctrl-C.
++    // So does Ctrl-Z (SIGTSTP): suspending would leave the ring streaming, unattended.
++    use tokio::signal::unix::{signal, SignalKind};
++    let mut hangup = signal(SignalKind::hangup())?;
++    let mut terminate = signal(SignalKind::terminate())?;
++    let mut suspend = signal(SignalKind::from_raw(18))?; // SIGTSTP on macOS/BSD
++    let interrupted = tokio::select! {
++        r = stream => { r?; false }
++        _ = tokio::signal::ctrl_c() => true,
++        _ = hangup.recv() => true,
++        _ = terminate.recv() => true,
++        _ = suspend.recv() => true,
++        _ = stop_rx.recv() => true,
++    };
++    if interrupted {
++        // Dropping the stream skipped its teardown; stop the ring streaming ourselves.
++        let _ = client
++            .transport()
++            .write(&oura_protocol::protocol::req_realtime_off())
++            .await;
++    }
+ 
+-    if count == 0 {
+-        println!("No samples. Make sure the ring is worn.");
++    let summary = if count == 0 {
++        "No samples. Make sure the ring is worn.".to_string()
+     } else {
+         let min = mags.iter().cloned().fold(f64::INFINITY, f64::min);
+         let max = mags.iter().cloned().fold(0.0, f64::max);
+         let moved = (max - min) > 2000.0;
+-        println!(
++        format!(
+             "{count} samples; |a| range {min:.0}..{max:.0} — {}",
+             if moved {
+                 "motion detected ✋"
+             } else {
+                 "mostly still"
+             }
+-        );
++        )
++    };
++    if jsonl {
++        eprintln!("{summary}");
++    } else {
++        println!("{summary}");
+     }
+     let _ = client.transport().disconnect().await;
+     Ok(())
+diff --git a/crates/oura-link/src/client.rs b/crates/oura-link/src/client.rs
+index f435352..dce3a56 100644
+--- a/crates/oura-link/src/client.rs
++++ b/crates/oura-link/src/client.rs
+@@ -811,7 +811,9 @@ impl<T: Transport> OuraClient<T> {
+             if remaining.is_zero() {
+                 break;
+             }
+-            match tokio::time::timeout(remaining, rx.recv()).await {
++            // ACM streams ~25 frames/s even when the ring is still, so 5 s of silence
++            // means the stream ended early (time-box cap, BLE drop): stop instead of hanging.
++            match tokio::time::timeout(remaining.min(Duration::from_secs(5)), rx.recv()).await {
+                 Ok(Ok(frame)) => {
+                     for sample in parse_acm_frame(&frame) {
+                         on_sample(sample);

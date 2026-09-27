@@ -1,0 +1,747 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Oura Play</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Host+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  /* Titanium surfaces; each reading wears the colour of the light the ring uses for it. */
+  :root {
+    --surface: #f5f7f9;
+    --plate: #e8ecef;
+    --plate-hover: #dde2e6;
+    --hair: #d5dbe0;
+    --ink: #1a2026;
+    --ink-2: #56606a;
+    --ink-3: #7d8791;
+    --ti-1: #aeb6bd;
+    --ti-2: #f1f3f5;
+    --ti-3: #c3c9cf;
+    --dome: #9aa3ab;
+    --pulse: #12875e;   /* green LED: heart rate */
+    --warm: #a67c0c;    /* temperature sensor */
+    --oxy: #c6264f;     /* red / infrared LEDs: blood oxygen */
+    --dock: #2f5fe0;    /* the charging dock's blue: ScreenOura */
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --surface: #171b1f;
+      --plate: #20262b;
+      --plate-hover: #2a3137;
+      --hair: #2b3239;
+      --ink: #e6eaee;
+      --ink-2: #a3adb7;
+      --ink-3: #7a848e;
+      --ti-1: #3a4148;
+      --ti-2: #6a737b;
+      --ti-3: #2d3338;
+      --dome: #5c656d;
+      --pulse: #2aa874;
+      --warm: #bb8a24;
+      --oxy: #dc4f66;
+      --dock: #5a88ee;
+      color-scheme: dark;
+    }
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: var(--surface);
+    color: var(--ink);
+    font: 400 15px/1.5 "Host Grotesk", ui-sans-serif, system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 28px 32px 56px; }
+  button { font: inherit; color: inherit; }
+  :focus-visible { outline: 2px solid var(--dock); outline-offset: 2px; }
+
+  /* header */
+  header { display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; }
+  header h1 { font-size: 24px; font-weight: 600; letter-spacing: -0.01em; margin: 0; }
+  header .device { color: var(--ink-2); }
+  header .battery { margin-left: auto; display: flex; align-items: center; gap: 10px; color: var(--ink-2); }
+  .cell { width: 26px; height: 12px; border: 1.5px solid var(--ink-2); border-radius: 3px; position: relative; padding: 1.5px; }
+  .cell::after { content: ""; position: absolute; right: -4px; top: 3px; width: 2px; height: 4px; background: var(--ink-2); border-radius: 0 1px 1px 0; }
+  .cell i { display: block; height: 100%; background: var(--ink-2); border-radius: 1px; width: 0; }
+  .link { background: none; border: 0; padding: 2px 4px; color: var(--ink-2); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; border-radius: 4px; }
+  .link:hover { color: var(--ink); }
+  .link:disabled { opacity: .45; cursor: default; text-decoration: none; }
+
+  /* instrument: dial + readings */
+  .instrument { display: grid; grid-template-columns: 360px 1fr; gap: 48px; align-items: center; margin-top: 36px; }
+  .dial { position: relative; width: 340px; height: 340px; }
+  .dial svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+  .dial .band { fill: none; stroke: url(#ti); stroke-width: 26; }
+  .dial .edge { fill: none; stroke: var(--hair); stroke-width: 1; }
+  .dial .track { fill: none; stroke: var(--hair); stroke-width: 2; }
+  .dial .progress { fill: none; stroke: var(--accent, var(--hair)); stroke-width: 3; stroke-linecap: round;
+                    transform: rotate(-90deg); transform-origin: 170px 170px; transition: stroke-dashoffset .9s linear; }
+  .dial .glow { fill: none; stroke: var(--accent, transparent); stroke-width: 30; opacity: 0; filter: blur(10px); transition: opacity .6s; }
+  .dial.live .glow { opacity: .22; }
+  .dial .dome { fill: var(--dome); transition: fill .3s; }
+  .dial.live .dome.on { fill: var(--accent); }
+  .dial.syncing .progress { stroke-dasharray: 90 903; animation: spin 1.4s linear infinite; transition: none; }
+  @keyframes spin { to { transform: rotate(270deg); } }
+  .dial.beat .glow { animation: beat .45s ease-out; }
+  @keyframes beat { 0% { opacity: .5; } 100% { opacity: .22; } }
+  .readout { position: absolute; inset: 70px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
+  .readout .value { font-size: 76px; font-weight: 600; line-height: 1; letter-spacing: -0.03em; }
+  .readout .value small { font-size: 20px; font-weight: 500; letter-spacing: 0; color: var(--ink-2); margin-left: 4px; }
+  .readout .caption { color: var(--ink-2); margin-top: 10px; max-width: 190px; font-size: 14px; line-height: 1.4; }
+  .readout .hint { color: var(--ink-2); font-size: 17px; max-width: 180px; }
+  .readout svg.trace { position: static; width: 150px; height: 30px; margin-top: 8px; }
+
+  .readings { list-style: none; margin: 0; padding: 0; }
+  .readings li { display: grid; grid-template-columns: 1fr auto; gap: 4px 20px; align-items: center; padding: 18px 0; border-top: 1px solid var(--hair); }
+  .readings li:last-child { border-bottom: 1px solid var(--hair); }
+  .readings .name { display: flex; align-items: center; gap: 10px; font-size: 18px; font-weight: 500; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--c); flex: none; }
+  li.active .dot { box-shadow: 0 0 0 4px color-mix(in srgb, var(--c) 25%, transparent); }
+  .readings .last { grid-column: 1; color: var(--ink-2); padding-left: 20px; }
+  .readings .last b { color: var(--ink); font-weight: 600; font-size: 17px; }
+  .readings button { grid-column: 2; grid-row: 1 / span 2; }
+
+  .btn { border: 0; border-radius: 10px; padding: 10px 16px; background: var(--plate); cursor: pointer; font-weight: 500; white-space: nowrap; }
+  .btn:hover:not(:disabled) { background: var(--plate-hover); }
+  .btn:disabled { opacity: .45; cursor: default; }
+  .btn.primary { background: var(--ink); color: var(--surface); padding: 12px 22px; border-radius: 12px; }
+  .btn.primary:hover:not(:disabled) { background: color-mix(in srgb, var(--ink) 85%, var(--surface)); }
+
+  .message { min-height: 24px; margin: 14px 0 0; color: var(--ink); display: flex; gap: 8px; }
+  .message:empty { display: none; }
+  .message::before { content: "!"; flex: none; width: 20px; height: 20px; border-radius: 50%; background: var(--plate); color: var(--ink);
+                     font-weight: 700; font-size: 13px; display: grid; place-items: center; margin-top: 1px; }
+
+  /* ScreenOura */
+  .screen { margin-top: 44px; padding: 26px 0 28px; border-top: 1px solid var(--hair); border-bottom: 1px solid var(--hair); }
+  .screen-head { display: grid; grid-template-columns: auto 1fr auto; gap: 8px 22px; align-items: center; }
+  .screen-head .actions { display: flex; gap: 10px; align-items: center; }
+  .led { width: 16px; height: 16px; border-radius: 50%; border: 1.5px solid var(--ink-3); }
+  .screen[data-state="connecting"] .led, .screen[data-state="stopping"] .led { border-color: var(--dock); background: var(--dock); animation: blink 1s steps(2, jump-none) infinite; }
+  .screen[data-state="running"] .led { border-color: var(--dock); background: color-mix(in srgb, var(--dock) 45%, transparent); }
+  .screen[data-state="steering"] .led { border-color: var(--dock); background: var(--dock); box-shadow: 0 0 0 5px color-mix(in srgb, var(--dock) 22%, transparent); }
+  @keyframes blink { 50% { opacity: .25; } }
+  .screen h2 { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -0.01em; }
+  .screen h3 { font-size: 16px; font-weight: 500; margin: 0 0 10px; }
+  .screen .status { color: var(--ink-2); }
+  .screen-body { display: grid; grid-template-columns: 180px minmax(0, 1.1fr) minmax(0, 1fr); gap: 28px 48px; margin-top: 24px; align-items: start; }
+
+  /* where the ring is aiming: the shaded zone holds the cursor still, the rim is full tilt */
+  .pad { margin: 0; }
+  .pad svg { width: 180px; height: 180px; display: block; overflow: visible; }
+  .pad .rim { fill: none; stroke: var(--hair); stroke-width: 1.5; }
+  .pad .axis { stroke: var(--hair); stroke-width: 1; }
+  .pad .still { fill: var(--plate); stroke: var(--ti-1); stroke-width: 1; }
+  .pad .vector { stroke: var(--dock); stroke-width: 3; stroke-linecap: round; opacity: 0; }
+  .pad .aim { fill: var(--ink-3); stroke: none; }
+  .pad[data-aim="moving"] .aim { fill: var(--dock); }
+  .pad[data-aim="moving"] .vector { opacity: .45; }
+  .pad[data-aim="off"] .aim { fill: var(--surface); stroke: var(--ink-3); stroke-width: 2; }
+  .pad[data-aim="away"] .aim, .pad[data-aim="none"] .aim { opacity: 0; }
+  .pad figcaption { color: var(--ink-2); font-size: 14px; line-height: 1.4; margin-top: 10px; min-height: 40px; }
+
+  .gestures { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 8px 18px; font-size: 14px; line-height: 1.4; }
+  .gestures dt { color: var(--ink); font-weight: 500; }
+  .gestures dd { margin: 0; color: var(--ink-2); }
+  .play { margin: 16px 0 0; color: var(--ink-2); font-size: 14px; }
+  .play a { color: var(--dock); font-weight: 500; text-underline-offset: 3px; }
+
+  .tune { display: grid; gap: 14px; }
+  .tune label { display: grid; grid-template-columns: 1fr auto; gap: 6px 12px; font-size: 14px; align-items: center; }
+  .tune output { color: var(--ink-2); font-variant-numeric: tabular-nums; }
+  .tune input[type=range] { grid-column: 1 / 3; width: 100%; margin: 0; accent-color: var(--dock); }
+  .tune label.check { display: flex; gap: 10px; }
+  .tune input[type=checkbox] { width: 16px; height: 16px; margin: 0; accent-color: var(--dock); flex: none; }
+  .tune .note { color: var(--ink-3); font-size: 13px; margin: 0; }
+
+  .activity { list-style: none; margin: 22px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 22px; color: var(--ink-2); font-size: 14px; }
+  .activity:empty { display: none; }
+  .activity time { color: var(--ink-3); margin-left: 6px; font-variant-numeric: tabular-nums; }
+
+  /* today */
+  .today { margin-top: 40px; }
+  .today h2 { font-size: 22px; font-weight: 600; margin: 0; letter-spacing: -0.01em; }
+  .today .sub { color: var(--ink-2); margin: 4px 0 0; }
+  .charts { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; margin-top: 22px; }
+  .chart h3 { display: flex; align-items: center; gap: 10px; font-size: 16px; font-weight: 500; margin: 0 0 8px; }
+  .plot { position: relative; height: 190px; }
+  .plot svg { width: 100%; height: 100%; display: block; }
+  .plot .grid { stroke: var(--hair); stroke-width: 1; }
+  .plot .tick { fill: var(--ink-3); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .plot .line { fill: none; stroke: var(--c); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+  .plot .wash { fill: var(--c); opacity: .1; }
+  .plot .end { fill: var(--c); stroke: var(--surface); stroke-width: 2; }
+  .plot .endlabel { fill: var(--ink); font-size: 13px; font-weight: 600; }
+  .plot .cross { stroke: var(--ink-3); stroke-width: 1; }
+  .tip { position: absolute; pointer-events: none; background: var(--ink); color: var(--surface); font-size: 13px; padding: 5px 9px;
+         border-radius: 7px; white-space: nowrap; transform: translate(-50%, -120%); display: none; }
+  .tip b { font-weight: 600; }
+  .empty { color: var(--ink-2); margin: 0; padding: 60px 0; text-align: center; border: 1px dashed var(--hair); border-radius: 10px; }
+  details { margin-top: 8px; color: var(--ink-2); font-size: 14px; }
+  details summary { cursor: pointer; width: max-content; }
+  details table { border-collapse: collapse; margin-top: 8px; font-variant-numeric: tabular-nums; }
+  details td, details th { padding: 3px 18px 3px 0; text-align: left; font-weight: 400; }
+  details th { color: var(--ink-3); }
+
+  .offline { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); background: var(--ink); color: var(--surface);
+             padding: 10px 16px; border-radius: 10px; display: none; }
+  .offline.show { display: block; }
+
+  @media (max-width: 920px) {
+    .instrument { grid-template-columns: 1fr; justify-items: center; gap: 28px; }
+    .readings { width: 100%; }
+    .charts { grid-template-columns: 1fr; }
+    .screen-body { grid-template-columns: 180px minmax(0, 1fr); }
+    .screen-body .tuning { grid-column: 1 / 3; }
+  }
+  @media (max-width: 560px) {
+    .wrap { padding: 20px 16px 40px; }
+    .dial { width: 290px; height: 290px; }
+    .readout { inset: 58px; }
+    .readout .value { font-size: 60px; }
+    .screen-head { grid-template-columns: auto 1fr; }
+    .screen-head .actions { grid-column: 1 / 3; flex-wrap: wrap; }
+    .screen-body { grid-template-columns: 1fr; }
+    .screen-body .tuning { grid-column: auto; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .dial .progress, .dial .glow { transition: none; }
+    .dial.syncing .progress { animation: none; stroke-dasharray: 90 903; }
+    .dial.beat .glow { animation: none; }
+    .screen[data-state="connecting"] .led, .screen[data-state="stopping"] .led { animation: none; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Oura Play</h1>
+    <span class="device">Old Oura Ring 4</span>
+    <span class="battery">
+      <span class="cell" aria-hidden="true"><i id="batteryFill"></i></span>
+      <span id="batteryText">Battery unknown</span>
+      <button class="link" id="batteryBtn" data-measure="battery">Check</button>
+    </span>
+  </header>
+
+  <section class="instrument">
+    <div class="dial" id="dial">
+      <svg viewBox="0 0 340 340" aria-hidden="true">
+        <defs>
+          <linearGradient id="ti" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" style="stop-color: var(--ti-1)"/>
+            <stop offset=".45" style="stop-color: var(--ti-2)"/>
+            <stop offset="1" style="stop-color: var(--ti-3)"/>
+          </linearGradient>
+        </defs>
+        <circle class="track" cx="170" cy="170" r="160"/>
+        <circle class="progress" id="progress" cx="170" cy="170" r="160" stroke-dasharray="1005.3" stroke-dashoffset="1005.3"/>
+        <circle class="glow" cx="170" cy="170" r="136"/>
+        <circle class="band" cx="170" cy="170" r="136"/>
+        <circle class="edge" cx="170" cy="170" r="123"/>
+        <circle class="edge" cx="170" cy="170" r="149"/>
+        <circle class="dome" data-dome="temperature" cx="143.3" cy="285.9" r="4.5"/>
+        <circle class="dome" data-dome="heart" cx="170" cy="289" r="4.5"/>
+        <circle class="dome" data-dome="oxygen" cx="196.7" cy="285.9" r="4.5"/>
+      </svg>
+      <div class="readout" role="status" aria-live="polite" id="readout"></div>
+    </div>
+
+    <div>
+      <ul class="readings">
+        <li data-row="heart" style="--c: var(--pulse)">
+          <span class="name"><span class="dot"></span>Heart rate</span>
+          <span class="last" id="last-heart">Not measured yet</span>
+          <button class="btn" data-measure="heart">Measure heart rate</button>
+        </li>
+        <li data-row="temperature" style="--c: var(--warm)">
+          <span class="name"><span class="dot"></span>Skin temperature</span>
+          <span class="last" id="last-temperature">Not checked yet</span>
+          <button class="btn" data-measure="temperature">Check temperature</button>
+        </li>
+        <li data-row="oxygen" style="--c: var(--oxy)">
+          <span class="name"><span class="dot"></span>Blood oxygen</span>
+          <span class="last" id="last-oxygen">Not checked yet</span>
+          <button class="btn" data-measure="oxygen">Check blood oxygen</button>
+        </li>
+      </ul>
+      <p class="message" id="message" role="alert"></p>
+    </div>
+  </section>
+
+  <section class="screen" id="screen" data-state="stopped">
+    <div class="screen-head">
+      <span class="led" aria-hidden="true"></span>
+      <div>
+        <h2>ScreenOura</h2>
+        <span class="status" id="screenStatus" role="status">Stopped</span>
+      </div>
+      <div class="actions">
+        <button class="btn" id="steerBtn" hidden>Pause steering</button>
+        <button class="btn primary" id="screenBtn">Start ScreenOura</button>
+      </div>
+    </div>
+
+    <div class="screen-body">
+      <figure class="pad" id="pad" data-aim="none">
+        <svg viewBox="0 0 180 180" aria-hidden="true">
+          <circle class="rim" cx="90" cy="90" r="70"/>
+          <line class="axis" x1="90" y1="12" x2="90" y2="168"/>
+          <line class="axis" x1="12" y1="90" x2="168" y2="90"/>
+          <rect class="still" id="padStill" rx="3"/>
+          <line class="vector" id="padVector" x1="90" y1="90" x2="90" y2="90"/>
+          <circle class="aim" id="padAim" cx="90" cy="90" r="7"/>
+        </svg>
+        <figcaption id="padHint">Start ScreenOura to see where the ring is aiming.</figcaption>
+      </figure>
+
+      <div>
+        <h3>How to use it</h3>
+        <dl class="gestures">
+          <dt>Tilt</dt><dd>Move the cursor. Aim at the middle to stop.</dd>
+          <dt>Tap</dt><dd>Click. Thumb onto the side of your index finger.</dd>
+          <dt>Tap twice</dt><dd>Double-click. Leave about half a second between taps.</dd>
+          <dt>Sweep</dt><dd>Scroll. Move the whole hand up or down; sweep again quickly to go further.</dd>
+          <dt>Palm up</dt><dd>Hold for a second to pause or resume steering. Right after Start it just confirms steering is on.</dd>
+        </dl>
+        <p class="play"><a href="/game">Play Quick Draw</a>, a one-minute target range for getting the hang of the ring, or the arcade: <a href="/pong">Ring Pong</a>, <a href="/invaders">Ring Invaders</a> and <a href="/flappy">Flappy Ring</a>.</p>
+      </div>
+
+      <div class="tuning">
+        <h3>Tuning</h3>
+        <div class="tune">
+          <label>Cursor speed <output id="speedOut"></output>
+            <input type="range" id="speed" data-setting="speed" min="300" max="2000" step="50"></label>
+          <label>Still zone <output id="deadzoneOut"></output>
+            <input type="range" id="deadzone" data-setting="deadzone" min="3" max="15" step="1"></label>
+          <label>Scroll per sweep <output id="scroll_pxOut"></output>
+            <input type="range" id="scroll_px" data-setting="scroll_px" min="100" max="1500" step="50"></label>
+          <label class="check"><input type="checkbox" id="flip_scroll" data-setting="flip_scroll"> Reverse scroll direction</label>
+          <label class="check"><input type="checkbox" id="steer_on_start" data-setting="steer_on_start"> Steer as soon as it connects</label>
+          <p class="note">Changes apply right away. The still zone is how far you tilt before the cursor moves.</p>
+        </div>
+      </div>
+    </div>
+
+    <ul class="activity" id="activity" aria-live="polite"></ul>
+  </section>
+
+  <section class="today">
+    <h2>Today, as the ring logged it</h2>
+    <p class="sub" id="todaySub">The ring measures on its own through the day. Checking temperature or blood oxygen pulls in its latest log.</p>
+    <div class="charts">
+      <div class="chart" style="--c: var(--pulse)">
+        <h3><span class="dot"></span>Heart rate</h3>
+        <div class="plot" id="chart-heart"></div>
+        <details><summary>Show values</summary><div id="table-heart"></div></details>
+      </div>
+      <div class="chart" style="--c: var(--warm)">
+        <h3><span class="dot"></span>Skin temperature</h3>
+        <div class="plot" id="chart-temperature"></div>
+        <details><summary>Show values</summary><div id="table-temperature"></div></details>
+      </div>
+    </div>
+  </section>
+</div>
+<div class="offline" id="offline">The dashboard server stopped. Start it again with dashboard.sh.</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const COLORS = { heart: "--pulse", temperature: "--warm", oxygen: "--oxy" };
+const NAMES = { heart: "heart rate", temperature: "skin temperature", oxygen: "blood oxygen", battery: "the battery", screenoura: "ScreenOura" };
+const S = { busy: null, readings: {}, screen: { connected: false, steering: false, activity: [] },
+            focus: null, beats: [], hrStart: 0, hrSeconds: 30, history: null, message: "",
+            settings: null, aim: null, starting: false };
+
+function ago(t) {
+  const s = Math.max(0, Date.now() / 1000 - t);
+  if (s < 45) return "just now";
+  if (s < 3600) return `${Math.round(s / 60)} min ago`;
+  if (s < 86400) return `${Math.round(s / 3600)} h ago`;
+  return `${Math.round(s / 86400)} days ago`;
+}
+const clock = (t) => new Date(t * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
+async function post(path, body) {
+  S.message = "";
+  let ok = false;
+  try {
+    const r = await fetch(path, { method: "POST", headers: { "X-Oura-Play": "1", "Content-Type": "application/json" },
+                                  body: JSON.stringify(body || {}) });
+    ok = r.ok;
+    if (!ok) S.message = (await r.json()).error || "That didn't work.";
+  } catch { S.message = "The dashboard server isn't answering."; }
+  render();
+  return ok;
+}
+
+document.querySelectorAll("[data-measure]").forEach((b) =>
+  b.addEventListener("click", () => {
+    const what = b.dataset.measure;
+    if (what !== "battery") S.focus = what;
+    post(`/api/measure/${what}`);
+  }));
+
+// ScreenOura buttons answer at once; the server's events then confirm or correct them.
+$("screenBtn").addEventListener("click", async () => {
+  if (S.busy === "screenoura") {
+    S.screen.stopping = true;
+    render();
+    if (!(await post("/api/screenoura/stop"))) S.screen.stopping = false;
+  } else {
+    S.starting = true;
+    render();
+    if (!(await post("/api/screenoura/start"))) S.starting = false;
+  }
+  render();
+});
+$("steerBtn").addEventListener("click", async () => {
+  const on = !S.screen.steering;
+  S.screen.steering = on;
+  render();
+  if (!(await post("/api/screenoura/steer", { on }))) S.screen.steering = !on;
+  render();
+});
+
+// Tuning: sliders show their value while dragging and save shortly after; boxes save on click.
+const UNITS = { speed: " px/s", deadzone: "°", scroll_px: " px" };
+let saveTimer;
+function saveSetting(input, now) {
+  const key = input.dataset.setting;
+  const value = input.type === "checkbox" ? input.checked : Number(input.value);
+  S.settings = { ...S.settings, [key]: value };
+  renderSettings();
+  clearTimeout(saveTimer);  // send everything, so a quick change to two controls can't drop one
+  saveTimer = setTimeout(() => post("/api/screenoura/settings", S.settings), now ? 0 : 200);
+}
+document.querySelectorAll("[data-setting]").forEach((input) => {
+  input.addEventListener("input", () => saveSetting(input, input.type === "checkbox"));
+  if (input.type === "range") input.addEventListener("change", () => saveSetting(input, true));
+});
+
+function handle(m) {
+  switch (m.type) {
+    case "state": {
+      S.busy = m.busy; S.readings = m.readings; S.screen = m.screenoura; S.settings = m.settings;
+      const latest = ["heart", "temperature", "oxygen"].filter((k) => m.readings[k])
+        .sort((a, b) => m.readings[b].at - m.readings[a].at)[0];
+      S.focus = S.focus || latest || null;
+      renderSettings();
+      break;
+    }
+    case "busy":
+      S.busy = m.what;
+      S.starting = false;
+      if (m.what !== "screenoura") S.aim = null;
+      if (m.what === "heart") { S.hrStart = 0; S.beats = []; S.focus = "heart"; }
+      break;
+    case "aim":  // ~12 a second while ScreenOura runs: only the pad needs redrawing
+      S.aim = m;
+      renderPad();
+      return;
+    case "settings":
+      S.settings = m;
+      renderSettings();
+      return;
+    case "heart_start":
+      S.focus = "heart"; S.beats = []; S.hrStart = Date.now(); S.hrSeconds = m.seconds; break;
+    case "beat":
+      S.beats.push(m.bpm);
+      pulse(); break;
+    case "reading":
+      S.readings[m.name] = m;
+      if (m.name !== "battery") S.focus = m.name;
+      break;
+    case "error":
+      S.message = m.message; break;
+    case "screen":
+      Object.assign(S.screen, m);
+      if (!m.connected) S.aim = null;
+      break;
+    case "history":
+      S.history = m; drawToday(); break;
+  }
+  render();
+}
+
+function pulse() {
+  const d = $("dial");
+  d.classList.remove("beat"); void d.offsetWidth; d.classList.add("beat");
+}
+
+function render() {
+  const busy = S.busy, focus = S.focus;
+  const measuring = busy && busy !== "screenoura" && busy !== "battery" ? busy : null;
+
+  // buttons: one ring job at a time
+  document.querySelectorAll("[data-measure]").forEach((b) => {
+    b.disabled = Boolean(busy);
+    const what = b.dataset.measure;
+    if (what === "battery") return;
+    b.textContent = busy === what ? (what === "heart" ? "Measuring…" : "Syncing…")
+      : { heart: "Measure heart rate", temperature: "Check temperature", oxygen: "Check blood oxygen" }[what];
+    b.title = busy === "screenoura" ? "Stop ScreenOura to take a reading." : "";
+  });
+  document.querySelectorAll("[data-row]").forEach((li) => li.classList.toggle("active", li.dataset.row === measuring));
+
+  // latest readings
+  const r = S.readings;
+  if (r.heart) $("last-heart").innerHTML = `<b>${r.heart.value} bpm</b>${r.heart.hrv ? `, HRV about ${r.heart.hrv} ms` : ""}, ${ago(r.heart.at)}`;
+  if (r.temperature) $("last-temperature").innerHTML = r.temperature.worn
+    ? `<b>${r.temperature.value} °C</b>, logged ${ago(r.temperature.logged)}`
+    : `Ring not on a finger when last logged (${r.temperature.value} °C)`;
+  if (r.oxygen) $("last-oxygen").innerHTML = r.oxygen.value == null ? "Measured while you sleep. None logged yet."
+    : `<b>${r.oxygen.value}%</b>, from the night, logged ${ago(r.oxygen.logged)}`;
+  if (r.battery) {
+    $("batteryText").textContent = `Battery ${r.battery.value}%`;
+    $("batteryFill").style.width = `${r.battery.value}%`;
+  } else if (busy === "battery") $("batteryText").textContent = "Checking battery…";
+  $("message").textContent = S.message;
+
+  renderDial(measuring, focus);
+  renderScreen();
+}
+
+function renderDial(measuring, focus) {
+  const d = $("dial"), out = $("readout"), prog = $("progress");
+  const what = measuring || focus;
+  d.style.setProperty("--accent", what ? `var(${COLORS[what]})` : "var(--hair)");
+  d.classList.toggle("live", Boolean(measuring));
+  d.classList.toggle("syncing", measuring === "temperature" || measuring === "oxygen");
+  d.querySelectorAll(".dome").forEach((c) => c.classList.toggle("on", c.dataset.dome === what));
+  const C = 1005.3;
+
+  if (measuring === "heart" && !S.hrStart) {
+    prog.style.strokeDashoffset = C;
+    out.innerHTML = `<div class="hint">Connecting to the ring…</div>`;
+    return;
+  }
+  if (measuring === "heart") {
+    const left = Math.max(0, S.hrSeconds - (Date.now() - S.hrStart) / 1000);
+    prog.style.strokeDashoffset = C * (left / S.hrSeconds);
+    const recent = S.beats.slice(-5).sort((a, b) => a - b);
+    const bpm = recent.length ? recent[Math.floor(recent.length / 2)] : null;
+    out.innerHTML = bpm
+      ? `<div class="value">${bpm}<small>bpm</small></div><div class="caption">Measuring. Hold still, ${Math.ceil(left)} s left.</div>${trace(S.beats)}`
+      : `<div class="hint">Listening for your pulse. Keep your hand still.</div>`;
+    return;
+  }
+  if (measuring) {
+    prog.style.strokeDashoffset = 0;
+    out.innerHTML = `<div class="hint">Syncing the ring's log…</div>`;
+    return;
+  }
+  prog.style.strokeDashoffset = C;
+  const r = focus && S.readings[focus];
+  if (!r) {
+    out.innerHTML = `<div class="hint">Choose a reading to take.</div>`;
+    return;
+  }
+  if (focus === "heart") {
+    out.innerHTML = `<div class="value">${r.value}<small>bpm</small></div><div class="caption">Heart rate, measured ${ago(r.at)}${r.hrv ? `. HRV about ${r.hrv} ms (rough).` : "."}</div>`;
+  } else if (focus === "temperature") {
+    out.innerHTML = r.worn
+      ? `<div class="value">${r.value}<small>°C</small></div><div class="caption">Skin temperature, logged ${ago(r.logged)}.</div>`
+      : `<div class="hint">The ring wasn't on a finger when it last logged (${r.value} °C). Wear it a few minutes and check again.</div>`;
+  } else if (focus === "oxygen") {
+    out.innerHTML = r.value == null
+      ? `<div class="hint">The ring measures blood oxygen while you sleep. Wear it tonight.</div>`
+      : `<div class="value">${r.value}<small>%</small></div><div class="caption">Blood oxygen, from the night. Logged ${ago(r.logged)}.</div>`;
+  }
+}
+
+function trace(values) {
+  if (values.length < 2) return "";
+  const w = 150, h = 30, lo = Math.min(...values) - 2, hi = Math.max(...values) + 2;
+  const pts = values.map((v, i) => `${(i / (values.length - 1)) * w},${h - ((v - lo) / (hi - lo)) * h}`).join(" ");
+  return `<svg class="trace" viewBox="0 0 ${w} ${h}" aria-hidden="true"><polyline points="${pts}" fill="none" stroke="var(--pulse)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/></svg>`;
+}
+
+function renderScreen() {
+  const s = S.screen, running = S.busy === "screenoura";
+  const state = s.stopping && running ? "stopping" : !running ? (S.starting ? "connecting" : "stopped")
+    : !s.connected ? "connecting" : s.steering ? "steering" : "running";
+  $("screen").dataset.state = state;
+  $("screenStatus").textContent = {
+    stopped: s.calibrated === false ? "Needs its one-time setup: use Calibrate in FunOura, or run ringmouse/run.sh --recalibrate in Terminal." : "Stopped",
+    connecting: "Connecting to the ring…",
+    running: "Paused. Palm up for a second to steer.",
+    steering: "Steering. Palm up for a second to pause.",
+    stopping: "Stopping…",
+  }[state];
+  const b = $("screenBtn");
+  b.textContent = state === "stopping" ? "Stopping…" : running || S.starting ? "Stop ScreenOura" : "Start ScreenOura";
+  b.disabled = state === "stopping" || (S.starting && !running) || (Boolean(S.busy) && !running);
+  b.title = S.busy && !running ? `Wait for ${NAMES[S.busy]} to finish.` : "";
+  const steer = $("steerBtn");
+  steer.hidden = !(state === "running" || state === "steering");
+  steer.textContent = s.steering ? "Pause steering" : "Resume steering";
+  $("activity").innerHTML = (s.activity || []).slice(0, 6)
+    .map((a) => `<li>${a.text}<time>${clock(a.at)}</time></li>`).join("");
+  renderPad();
+}
+
+function renderPad() {
+  const s = S.screen, a = S.aim, pad = $("pad"), running = S.busy === "screenoura";
+  const full = s.full || { up: 25, down: 25, right: 30 }, R = 70, C = 90;
+  const dz = (S.settings && S.settings.deadzone) || 8;
+  // Tilts inside the shaded zone hold the cursor still (each direction has its own), and the rim is
+  // full tilt. Up and down are scaled separately because wrists bend further one way.
+  const side = Math.min(dz / full.right, 1) * R, top = Math.min(dz / full.up, 1) * R, bottom = Math.min(dz / full.down, 1) * R;
+  const still = $("padStill");
+  still.setAttribute("x", (C - side).toFixed(1)); still.setAttribute("width", (2 * side).toFixed(1));
+  still.setAttribute("y", (C - top).toFixed(1)); still.setAttribute("height", (top + bottom).toFixed(1));
+  let state = "none", hint;
+  if (!running) hint = S.starting ? "Connecting to the ring…" : "Start ScreenOura to see where the ring is aiming.";
+  else if (s.stopping) hint = "Stopping…";
+  else if (!s.connected || !a) hint = "Connecting to the ring…";
+  else if (s.turned && a.on && !a.centered) { state = "away"; hint = "The ring seems turned around on your finger. Turn it back the way it sat at setup, or redo the setup."; }
+  else if (!a.range) { state = "away"; hint = "Hand away from the screen, so the cursor waits."; }
+  else if (!a.on) { state = "off"; hint = "Steering is paused. Palm up for a second, or press Resume steering."; }
+  else if (!a.centered) { state = "off"; hint = "Aim at the middle of the screen to begin."; }
+  else if (a.moving) { state = "moving"; hint = "Moving the cursor. Aim at the middle to stop."; }
+  else { state = "still"; hint = "Holding the cursor still. Tilt past the shaded zone to move it."; }
+  pad.dataset.aim = state;
+  const edge = (v) => Math.max(-1.3, Math.min(1.3, v));
+  const x = a && running ? C + edge(a.right / full.right) * R : C;
+  const y = a && running ? C - edge(a.up / (a.up > 0 ? full.up : full.down)) * R : C;
+  for (const [el, kx, ky] of [[$("padAim"), "cx", "cy"], [$("padVector"), "x2", "y2"]]) {
+    el.setAttribute(kx, x.toFixed(1));
+    el.setAttribute(ky, y.toFixed(1));
+  }
+  $("padHint").textContent = hint;
+}
+
+function renderSettings() {
+  const st = S.settings;
+  if (!st) return;
+  document.querySelectorAll("[data-setting]").forEach((input) => {
+    const key = input.dataset.setting;
+    if (input.type === "checkbox") input.checked = Boolean(st[key]);
+    else if (document.activeElement !== input) input.value = st[key];  // don't fight a drag in progress
+    const out = $(`${key}Out`);
+    if (out) out.textContent = `${Math.round(Number(input.value))}${UNITS[key]}`;
+  });
+  renderPad();
+}
+
+// --- today's charts ------------------------------------------------------------
+
+function niceTicks(lo, hi, n = 4) {
+  const span = hi - lo || 1, raw = span / n, mag = 10 ** Math.floor(Math.log10(raw));
+  const step = [1, 2, 2.5, 5, 10].map((f) => f * mag).find((s) => s >= raw);
+  const a = Math.floor(lo / step) * step, b = Math.ceil(hi / step) * step, out = [];
+  for (let v = a; v <= b + step / 2; v += step) out.push(+v.toFixed(6));
+  return out;
+}
+
+function drawChart(id, points, { unit, digits, empty }) {
+  const el = $(`chart-${id}`);
+  if (!points.length) {
+    el.innerHTML = `<p class="empty">${empty}</p>`;
+    $(`table-${id}`).innerHTML = "";
+    return;
+  }
+  const endText = `${points[points.length - 1][1].toFixed(digits)} ${unit}`;
+  const W = el.clientWidth || 480, H = 190, m = { l: 38, r: 20 + endText.length * 8, t: 14, b: 26 };
+  const t0 = points[0][0], t1 = Math.max(points[points.length - 1][0], t0 + 600);
+  const vals = points.map((p) => p[1]);
+  const ticks = niceTicks(Math.min(...vals), Math.max(...vals));
+  const lo = ticks[0], hi = ticks[ticks.length - 1];
+  const x = (t) => m.l + ((t - t0) / (t1 - t0)) * (W - m.l - m.r);
+  const y = (v) => m.t + (1 - (v - lo) / (hi - lo || 1)) * (H - m.t - m.b);
+  const fmt = (v) => v.toFixed(digits);
+
+  // break the line where the ring logged nothing for 20 minutes (off the finger, charging)
+  const runs = [[]];
+  points.forEach((p, i) => {
+    if (i && p[0] - points[i - 1][0] > 1200) runs.push([]);
+    runs[runs.length - 1].push(p);
+  });
+  const path = (run) => run.map((p, i) => `${i ? "L" : "M"}${x(p[0]).toFixed(1)},${y(p[1]).toFixed(1)}`).join("");
+  const wash = (run) => `${path(run)}L${x(run[run.length - 1][0]).toFixed(1)},${y(lo)}L${x(run[0][0]).toFixed(1)},${y(lo)}Z`;
+
+  const hours = [];
+  const first = new Date(t0 * 1000); first.setMinutes(0, 0, 0);
+  const every = (t1 - t0) > 6 * 3600 ? 3 : (t1 - t0) > 2 * 3600 ? 1 : 0.5;
+  for (let t = first.getTime() / 1000 + every * 3600; t < t1; t += every * 3600) if (t > t0) hours.push(t);
+
+  const last = points[points.length - 1];
+  el.innerHTML = `
+    <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${id === "heart" ? "Heart rate" : "Skin temperature"} over the last ${Math.round((t1 - t0) / 3600)} hours">
+      ${ticks.map((v) => `<line class="grid" x1="${m.l}" x2="${W - m.r}" y1="${y(v)}" y2="${y(v)}"/><text class="tick" x="${m.l - 8}" y="${y(v) + 4}" text-anchor="end">${fmt(v)}</text>`).join("")}
+      ${hours.map((t) => `<text class="tick" x="${x(t)}" y="${H - 6}" text-anchor="middle">${clock(t)}</text>`).join("")}
+      ${runs.filter((r) => r.length > 1).map((r) => `<path class="wash" d="${wash(r)}"/>`).join("")}
+      ${runs.map((r) => r.length > 1 ? `<path class="line" d="${path(r)}"/>` : `<circle class="end" r="2.5" cx="${x(r[0][0])}" cy="${y(r[0][1])}"/>`).join("")}
+      <circle class="end" r="4" cx="${x(last[0])}" cy="${y(last[1])}"/>
+      <text class="endlabel" x="${x(last[0]) + 9}" y="${y(last[1]) + 4}">${endText}</text>
+      <line class="cross" y1="${m.t}" y2="${H - m.b}" x1="-10" x2="-10"/>
+      <circle class="end hover" r="4" cx="-10" cy="-10"/>
+      <rect x="${m.l}" y="0" width="${W - m.l - m.r}" height="${H}" fill="transparent"/>
+    </svg>
+    <div class="tip"></div>`;
+
+  const svg = el.querySelector("svg"), tip = el.querySelector(".tip");
+  const cross = svg.querySelector(".cross"), dot = svg.querySelector(".hover");
+  svg.addEventListener("pointermove", (e) => {
+    const bx = svg.getBoundingClientRect(), px = ((e.clientX - bx.left) / bx.width) * W;
+    const t = t0 + ((px - m.l) / (W - m.l - m.r)) * (t1 - t0);
+    let best = points[0];
+    for (const p of points) if (Math.abs(p[0] - t) < Math.abs(best[0] - t)) best = p;
+    const cx = x(best[0]), cy = y(best[1]);
+    cross.setAttribute("x1", cx); cross.setAttribute("x2", cx);
+    dot.setAttribute("cx", cx); dot.setAttribute("cy", cy);
+    tip.style.display = "block";
+    tip.style.left = `${(cx / W) * 100}%`; tip.style.top = `${(cy / H) * 100}%`;
+    tip.innerHTML = `${clock(best[0])} <b>${fmt(best[1])} ${unit}</b>`;
+  });
+  svg.addEventListener("pointerleave", () => {
+    tip.style.display = "none";
+    cross.setAttribute("x1", -10); cross.setAttribute("x2", -10); dot.setAttribute("cy", -10);
+  });
+
+  // table view: one row per hour
+  const byHour = new Map();
+  points.forEach(([t, v]) => {
+    const d = new Date(t * 1000); d.setMinutes(0, 0, 0);
+    const k = d.getTime() / 1000;
+    byHour.set(k, [...(byHour.get(k) || []), v]);
+  });
+  $(`table-${id}`).innerHTML = `<table><tr><th>Hour</th><th>Average</th><th>Readings</th></tr>${[...byHour]
+    .map(([k, v]) => `<tr><td>${clock(k)}</td><td>${fmt(v.reduce((a, b) => a + b, 0) / v.length)} ${unit}</td><td>${v.length}</td></tr>`).join("")}</table>`;
+}
+
+function drawToday() {
+  const h = S.history || { heart: [], temperature: [] };
+  drawChart("heart", h.heart, { unit: "bpm", digits: 0,
+    empty: "No heart rate logged in the last 12 hours. Wear the ring, then check temperature to pull in its log." });
+  drawChart("temperature", h.temperature.filter((p) => p[1] >= 30), { unit: "°C", digits: 1,
+    empty: "No skin temperature logged while worn in the last 12 hours." });
+  $("todaySub").textContent = h.synced_at
+    ? `The ring measures on its own through the day. Last pulled from the ring ${ago(h.synced_at)}; checking temperature or blood oxygen pulls in more.`
+    : "Nothing pulled from the ring yet. Checking temperature or blood oxygen pulls in its log.";
+}
+
+// --- wiring --------------------------------------------------------------------
+
+function connect() {
+  const es = new EventSource("/api/stream");
+  es.onopen = () => $("offline").classList.remove("show");
+  es.onmessage = (e) => handle(JSON.parse(e.data));
+  es.onerror = () => $("offline").classList.add("show");
+}
+fetch("/api/history").then((r) => r.json()).then((h) => { S.history = h; drawToday(); });
+connect();
+render();
+setInterval(() => { if (S.busy === "heart") renderDial("heart", "heart"); }, 500);
+setInterval(render, 20000);
+let resizeTimer;
+window.addEventListener("resize", () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(drawToday, 150); });
+</script>
+</body>
+</html>

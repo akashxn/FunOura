@@ -1,0 +1,20 @@
+# Built by setup.sh
+open_oura/
+funoura/FunOura.app/
+
+# Your ring: its auth key and address (pair.sh)
+ring.json
+ring.key
+ring.key.old
+*.key
+
+# Your data: never commit these
+dashboard/oura.db*
+dashboard/screenoura.json
+ringmouse/calibration.json
+ringmouse/calibration-point.json
+ringmouse/taps.json
+ringmouse/data/
+
+__pycache__/
+.DS_Store

@@ -1,0 +1,547 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flappy Ring</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Host+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  /* Quick Draw's dark titanium: the bird is the ring itself, the pipes are its band. */
+  :root {
+    --field: #171b1f;
+    --plate: #20262b;
+    --plate-hover: #2a3137;
+    --hair: #2b3239;
+    --ink: #e6eaee;
+    --ink-2: #a3adb7;
+    --ink-3: #7a848e;
+    --ti-1: #aeb6bd;
+    --ti-2: #f1f3f5;
+    --ti-3: #88919a;
+    --pulse: #2aa874;
+    --warm: #bb8a24;
+    --oxy: #dc4f66;
+    --dock: #5a88ee;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    overflow: hidden;
+    background: var(--field);
+    color: var(--ink);
+    font: 400 15px/1.5 "Host Grotesk", ui-sans-serif, system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; cursor: none; touch-action: none; }
+  button, a { font: inherit; color: inherit; }
+  :focus-visible { outline: 2px solid var(--dock); outline-offset: 3px; border-radius: 6px; }
+  [hidden] { display: none !important; }
+
+  .screen { position: fixed; inset: 0; pointer-events: none; text-align: center; display: flex; flex-direction: column;
+            align-items: center; justify-content: center; padding: 16px; }
+  .screen.dim { background: rgba(23,27,31,0.72); }
+  .screen a, .screen button { pointer-events: auto; }
+  h1 { margin: 0; font-size: clamp(56px, 9vw, 108px); font-weight: 700; letter-spacing: -0.045em; line-height: .92; }
+  h2 { margin: 0; font-weight: 700; letter-spacing: -0.035em; line-height: 1; font-size: 56px; }
+  .lede { margin: 16px auto 0; max-width: 40ch; color: var(--ink-2); font-size: 17px; }
+  .prompt { margin: 36px 0 0; color: var(--ink); font-size: 18px; font-weight: 600; }
+  .moves { display: inline-grid; grid-template-columns: repeat(2, minmax(0, auto)); gap: 10px 40px; margin: 36px 0 0; text-align: left; }
+  .moves dt { font-weight: 600; }
+  .moves dd { margin: 0; color: var(--ink-2); max-width: 22ch; }
+  .fine { margin: 18px 0 0; color: var(--ink-3); font-size: 14px; }
+  .final { font-size: clamp(72px, 11vw, 120px); font-variant-numeric: tabular-nums; }
+  .verdict { margin: 12px 0 0; color: var(--ink-2); }
+  .verdict.best { color: var(--pulse); font-weight: 600; }
+  .back { position: fixed; top: 22px; left: 28px; color: var(--ink-2); text-decoration: underline; text-underline-offset: 3px; }
+  .back:hover { color: var(--ink); }
+  /* the title sits in the top half, so the ring bobbing in the middle stays in view */
+  #titleScreen { justify-content: flex-start; padding-top: 12vh; }
+  #titleScreen .prompt { margin-top: 30vh; }
+
+  .chip { position: fixed; left: 28px; bottom: 22px; display: flex; align-items: center; gap: 12px; max-width: calc(100vw - 190px);
+          color: var(--ink-2); font-size: 14px; text-align: left; }
+  .led { flex: none; width: 12px; height: 12px; border-radius: 50%; border: 1.5px solid var(--ink-3); }
+  .led[data-state="connecting"] { border-color: var(--dock); background: var(--dock); animation: blink 1s steps(2, jump-none) infinite; }
+  .led[data-state="running"] { border-color: var(--dock); background: color-mix(in srgb, var(--dock) 45%, transparent); }
+  .led[data-state="steering"] { border-color: var(--dock); background: var(--dock); box-shadow: 0 0 0 4px color-mix(in srgb, var(--dock) 22%, transparent); }
+  @keyframes blink { 50% { opacity: .25; } }
+  .btn { flex: none; border: 0; border-radius: 10px; padding: 8px 14px; background: var(--plate); color: var(--ink); cursor: pointer; font-weight: 500; }
+  .btn:hover:not(:disabled) { background: var(--plate-hover); }
+  .btn:disabled { opacity: .5; cursor: default; }
+  .sound { position: fixed; right: 28px; bottom: 22px; }
+  .sound[aria-pressed="false"] { color: var(--ink-3); }
+
+  @media (max-width: 760px) {
+    .moves { grid-template-columns: minmax(0, auto); }
+    .chip { left: 16px; right: 16px; bottom: 16px; max-width: none; flex-wrap: wrap; }
+    .sound { right: 16px; top: 12px; bottom: auto; }
+    .back { left: 16px; top: 16px; }
+  }
+  @media (prefers-reduced-motion: reduce) { .led[data-state="connecting"] { animation: none; } }
+</style>
+</head>
+<body>
+<canvas id="field" aria-label="Flappy Ring"></canvas>
+
+<section class="screen" id="titleScreen">
+  <a class="back" href="/">Back to the dashboard</a>
+  <h1>Flappy Ring</h1>
+  <p class="lede">Every tap gives the ring a lift. Slip through the gaps; each one is a point.</p>
+  <p class="prompt">Tap to fly</p>
+  <dl class="moves">
+    <div><dt>Flap</dt><dd>Tap your thumb on your index finger</dd></div>
+    <div><dt>Pause</dt><dd>Palm up for a second</dd></div>
+  </dl>
+  <p class="fine" id="bestTitle">No ring? Space, ↑ or a click work too. Esc leaves full screen.</p>
+</section>
+
+<section class="screen dim" id="pauseScreen" hidden>
+  <h2>Paused</h2>
+  <p class="lede" id="pauseWhy"></p>
+  <p class="prompt" id="pausePrompt">Tap to carry on</p>
+</section>
+
+<section class="screen dim" id="overScreen" hidden>
+  <a class="back" href="/">Back to the dashboard</a>
+  <p class="lede">Crashed</p>
+  <h2 class="final" id="finalScore">0</h2>
+  <p class="verdict" id="verdict"></p>
+  <p class="prompt" id="againPrompt">Tap to fly again</p>
+</section>
+
+<div class="chip" id="chip">
+  <span class="led" id="chipLed" aria-hidden="true"></span>
+  <span id="chipText">Looking for ScreenOura…</span>
+  <button class="btn" id="chipStart" hidden>Start ScreenOura</button>
+</div>
+<button class="btn sound" id="soundBtn" aria-pressed="true">Sound on</button>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const css = getComputedStyle(document.documentElement);
+const token = (name) => css.getPropertyValue(name).trim();
+const TAU = Math.PI * 2;
+const INK = token("--ink"), INK3 = token("--ink-3"), HAIR = token("--hair"), FIELD = token("--field"),
+      PULSE = token("--pulse"), OXY = token("--oxy");
+const TITANIUM = ["--ti-1", "--ti-2", "--ti-3"].map(token);
+const clamp = (v, lo, hi) => Math.min(Math.max(v, lo), hi);
+const store = {
+  get(k, fallback) { try { const v = localStorage.getItem(k); return v === null ? fallback : JSON.parse(v); } catch { return fallback; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* private window: fine */ } },
+};
+const now = () => performance.now() / 1000;
+
+// Everything is measured in screen heights, so the game plays the same in any window.
+// A ring tap reaches the page about 0.2 s after the thumb moves, and ringmouse takes one tap per 0.3 s at most:
+// the physics are floaty and the gaps wide to match.
+const P = {
+  gravity: 1.1, flap: 0.45, maxFall: 0.65,     // H/s², H/s, H/s: a slow fall gives the late tap time to land
+  ground: 0.9, radius: 0.032,
+  pipeW: 0.11, spacing: 0.8,                    // pipes this far apart
+  speed: 0.3, speedUp: 0.008, speedMax: 40,     // +0.8% a point, for the first 40 points
+  gap: 0.32, gapMin: 0.24, gapShrink: 0.003,    // gap narrows 0.3% of the height a point
+  swing: 0.28,                                  // most the gap moves from one pipe to the next
+};
+
+const cv = $("field"), ctx = cv.getContext("2d");
+let W = 0, H = 0;
+
+function resize() {
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  W = window.innerWidth;
+  H = window.innerHeight;
+  cv.width = Math.round(W * dpr);
+  cv.height = Math.round(H * dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+
+const G = {
+  mode: "title",          // title | playing | dying | paused | over
+  y: 0.5, vy: 0, score: 0, pipes: [], scroll: 0, flapAt: -1, dieAt: 0,
+  pause: null, ringPlay: false, againAt: 0,
+  best: store.get("flappy.best", 0),
+};
+const birdX = () => Math.min(W * 0.3, H * 0.55) / H;  // in heights, like everything else
+
+function fullScreen() {
+  if (!document.fullscreenElement && document.documentElement.requestFullscreen) {
+    document.documentElement.requestFullscreen().catch(() => {});
+  }
+}
+
+function startGame() {
+  Sound.wake();
+  fullScreen();
+  Object.assign(G, { y: 0.45, vy: 0, score: 0, pipes: [], pause: null });
+  G.ringPlay = ring.running && ring.connected && ring.steering;
+  addPipe(W / H + 0.2);
+  show("playing");
+  flap();
+}
+
+function gapSize() { return Math.max(P.gapMin, P.gap - G.score * P.gapShrink); }
+function speed() { return P.speed * (1 + Math.min(G.score, P.speedMax) * P.speedUp); }
+
+function addPipe(x) {
+  const gap = gapSize(), lo = 0.06 + gap / 2, hi = P.ground - 0.06 - gap / 2;
+  const prev = G.pipes.length ? G.pipes[G.pipes.length - 1].gapY : 0.45;
+  const gapY = clamp(prev + (Math.random() * 2 - 1) * P.swing, lo, hi);
+  G.pipes.push({ x, gapY, gap, passed: false });
+}
+
+function flap() {
+  if (G.mode !== "playing") return;
+  G.vy = -P.flap;
+  G.flapAt = now();
+  Sound.flap();
+}
+
+function crash() {
+  G.mode = "dying";
+  G.dieAt = now();
+  Sound.hit();
+}
+
+function endGame() {
+  const best = G.score > G.best;
+  if (best) { G.best = G.score; store.set("flappy.best", G.best); }
+  $("finalScore").textContent = G.score;
+  $("verdict").textContent = best ? "Your best yet" : `Your best is ${G.best}`;
+  $("verdict").classList.toggle("best", best);
+  G.againAt = now() + 0.9;  // the last frantic tap can't restart it
+  $("againPrompt").style.visibility = "hidden";
+  setTimeout(() => { $("againPrompt").style.visibility = ""; }, 900);
+  show("over");
+}
+
+function pause(reason) {
+  if (G.mode !== "playing") return;
+  G.pause = { reason };
+  $("pauseWhy").textContent = {
+    steering: "Steering is paused. Palm up for a second to carry on.",
+    stopped: "ScreenOura stopped. Start it again below, or carry on with Space.",
+    hidden: "The game stops while you can't see it.",
+    fullscreen: "You left full screen.",
+    key: "Take your time.",
+  }[reason];
+  $("pausePrompt").hidden = reason === "steering";
+  show("paused");
+}
+
+function resume() {
+  if (G.mode !== "paused") return;
+  G.pause = null;
+  G.ringPlay = ring.running && ring.connected && ring.steering;
+  show("playing");
+  flap();  // carry on with a lift rather than a drop
+}
+
+function show(mode) {
+  G.mode = mode;
+  $("titleScreen").hidden = mode !== "title";
+  $("pauseScreen").hidden = mode !== "paused";
+  $("overScreen").hidden = mode !== "over";
+  // during a flight every tap is a real click: nothing clickable may sit under the cursor
+  const calm = mode === "title" || mode === "paused" || mode === "over";
+  $("chip").hidden = !calm;
+  $("soundBtn").hidden = !calm;
+  if (mode === "title" && G.best) $("bestTitle").textContent = `Your best is ${G.best}. Space, ↑ or a click work too. Esc leaves full screen.`;
+}
+
+// --- each frame --------------------------------------------------------------------
+
+function update(dt) {
+  const t = now();
+  if (G.mode === "title") { G.y = 0.5 + Math.sin(t * 3) * 0.02; G.scroll += P.speed * dt; return; }
+  if (G.mode === "paused" || G.mode === "over") return;
+
+  // the ring
+  G.vy = Math.min(G.vy + P.gravity * dt, P.maxFall);
+  G.y += G.vy * dt;
+  if (G.y < P.radius) { G.y = P.radius; G.vy = 0; }
+  if (G.y > P.ground - P.radius) {
+    G.y = P.ground - P.radius;
+    if (G.mode === "playing") crash();
+  }
+  if (G.mode === "dying") { if (t - G.dieAt > 0.8) endGame(); return; }
+
+  // the pipes
+  const v = speed() * dt, bx = birdX(), r = P.radius * 0.85;  // a little forgiving at the edges
+  G.scroll += v;
+  for (const p of G.pipes) {
+    p.x -= v;
+    const topY = p.gapY - p.gap / 2, botY = p.gapY + p.gap / 2;
+    if (hits(bx, G.y, r, p.x, -1, P.pipeW, topY + 1) || hits(bx, G.y, r, p.x, botY, P.pipeW, P.ground - botY)) { crash(); return; }
+    if (!p.passed && p.x + P.pipeW < bx) { p.passed = true; G.score++; Sound.point(); }
+  }
+  G.pipes = G.pipes.filter((p) => p.x + P.pipeW > -0.1);
+  const lastPipe = G.pipes[G.pipes.length - 1];
+  if (!lastPipe || lastPipe.x < W / H + 0.1 - P.spacing) addPipe((lastPipe ? lastPipe.x : W / H) + P.spacing);
+}
+
+// a circle against a rectangle: the nearest point of the rectangle is inside the circle
+function hits(cx, cy, r, x, y, w, h) {
+  return Math.hypot(cx - clamp(cx, x, x + w), cy - clamp(cy, y, y + h)) < r;
+}
+
+// --- drawing -----------------------------------------------------------------------
+
+function draw() {
+  const t = now();
+  ctx.fillStyle = FIELD;
+  ctx.fillRect(0, 0, W, H);
+
+  // faint dots drifting behind, slower than the pipes
+  ctx.fillStyle = "rgba(230,234,238,0.08)";
+  for (let i = 0; i < 40; i++) {
+    const x = ((i * 0.377 - G.scroll * 0.25) % (W / H + 0.2) + W / H + 0.2) % (W / H + 0.2) - 0.1;
+    const y = (i * 0.618) % 1 * P.ground;
+    ctx.beginPath(); ctx.arc(x * H, y * H, 1.5 + (i % 3), 0, TAU); ctx.fill();
+  }
+
+  // pipes: titanium bands with a cap
+  for (const p of G.pipes) {
+    const x = p.x * H, w = P.pipeW * H, top = (p.gapY - p.gap / 2) * H, bot = (p.gapY + p.gap / 2) * H;
+    const g = ctx.createLinearGradient(x, 0, x + w, 0);
+    g.addColorStop(0, TITANIUM[2]); g.addColorStop(0.4, TITANIUM[1]); g.addColorStop(1, TITANIUM[0]);
+    ctx.fillStyle = g;
+    ctx.globalAlpha = 0.85;
+    ctx.fillRect(x, 0, w, top);
+    ctx.fillRect(x, bot, w, P.ground * H - bot);
+    const cap = H * 0.03;
+    ctx.fillRect(x - cap * 0.3, top - cap, w + cap * 0.6, cap);
+    ctx.fillRect(x - cap * 0.3, bot, w + cap * 0.6, cap);
+    ctx.globalAlpha = 1;
+  }
+
+  // the ground, scrolling
+  const gy = P.ground * H;
+  ctx.fillStyle = HAIR;
+  ctx.fillRect(0, gy, W, H - gy);
+  ctx.fillStyle = "rgba(230,234,238,0.07)";
+  const step = H * 0.06;
+  for (let x = -((G.scroll * H) % step); x < W; x += step) ctx.fillRect(x, gy + 6, step * 0.5, 3);
+
+  // the score, big and faint behind the play
+  if (G.mode !== "title") {
+    ctx.textAlign = "center";
+    ctx.textBaseline = "top";
+    ctx.font = `700 ${Math.round(H * 0.14)}px "Host Grotesk", system-ui, sans-serif`;
+    ctx.fillStyle = "rgba(230,234,238,0.16)";
+    ctx.fillText(String(G.score), W / 2, H * 0.06);
+  }
+
+  drawRing(birdX() * H, G.y * H, P.radius * H, t);
+}
+
+// The ring face on, tipping nose up after a flap and down as it falls; its sensors glow green, red once it's hit.
+function drawRing(x, y, R, t) {
+  const dead = G.mode === "dying" || G.mode === "over";
+  const color = dead ? OXY : PULSE;
+  const lift = clamp(1 - (t - G.flapAt) / 0.25, 0, 1);
+  const tilt = G.mode === "title" ? 0 : clamp(G.vy / P.maxFall, -0.6, 1) * 0.9;
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(tilt);
+  const glow = ctx.createRadialGradient(0, 0, R * 0.4, 0, 0, R * 1.8);
+  glow.addColorStop(0, "rgba(0,0,0,0)");
+  glow.addColorStop(0.6, color + (lift > 0 ? "66" : "30"));
+  glow.addColorStop(1, "rgba(0,0,0,0)");
+  ctx.fillStyle = glow;
+  ctx.beginPath(); ctx.arc(0, 0, R * 1.8, 0, TAU); ctx.fill();
+  const band = R * 0.3;
+  const g = ctx.createLinearGradient(-R, -R, R, R);
+  g.addColorStop(0, TITANIUM[0]); g.addColorStop(0.45, TITANIUM[1]); g.addColorStop(1, TITANIUM[2]);
+  ctx.lineWidth = band;
+  ctx.strokeStyle = g;
+  ctx.beginPath(); ctx.arc(0, 0, R - band / 2, 0, TAU); ctx.stroke();
+  ctx.fillStyle = color;
+  ctx.shadowColor = color;
+  ctx.shadowBlur = 6 + 10 * lift;
+  const dome = Math.max(2, R * 0.09), inner = R - band - R * 0.12;
+  for (const k of [-1, 0, 1]) {
+    const a = Math.PI / 2 + k * 0.35;
+    ctx.beginPath(); ctx.arc(Math.cos(a) * inner, Math.sin(a) * inner, dome, 0, TAU); ctx.fill();
+  }
+  ctx.restore();
+}
+
+// --- ScreenOura, from the dashboard's live updates (as in Quick Draw) -----------------
+
+const ring = { present: false, running: false, connected: false, steering: false, stopping: false, busy: null, error: "" };
+
+function listen() {
+  if (location.protocol === "file:") { renderChip(); return; }
+  const es = new EventSource("/api/stream");
+  es.onopen = () => { ring.present = true; renderChip(); };
+  es.onerror = () => { ring.present = false; ring.running = false; renderChip(); };
+  es.onmessage = (e) => {
+    const m = JSON.parse(e.data);
+    if (m.type === "state") {
+      ring.busy = m.busy;
+      ring.running = m.busy === "screenoura";
+      screenFields(m.screenoura);
+    } else if (m.type === "busy") {
+      ring.busy = m.what;
+      ring.running = m.what === "screenoura";
+      if (ring.running) ring.error = "";
+      else screenFields({});
+    } else if (m.type === "screen") {
+      screenFields(m);
+    } else if (m.type === "error" && m.name === "screenoura") {
+      ring.error = m.message;
+    } else {
+      return;
+    }
+    ringChanged();
+  };
+}
+
+function screenFields(s) {
+  ring.connected = Boolean(s && s.connected);
+  ring.steering = Boolean(s && s.steering);
+  ring.stopping = Boolean(s && s.stopping);
+}
+
+function ringChanged() {
+  const steering = ring.running && ring.connected && ring.steering && !ring.stopping;
+  if (G.ringPlay && G.mode === "playing") {
+    if (!ring.running || ring.stopping) pause("stopped");
+    else if (ring.connected && !ring.steering) pause("steering");  // palm up: the pause gesture
+  } else if (G.mode === "paused" && G.pause.reason === "steering") {
+    if (steering) resume();
+    else if (!ring.running || ring.stopping) {
+      G.pause.reason = "stopped";
+      $("pauseWhy").textContent = "ScreenOura stopped. Start it again below, or carry on with Space.";
+      $("pausePrompt").hidden = false;
+    }
+  }
+  renderChip();
+}
+
+function renderChip() {
+  let state = "off", text;
+  if (!ring.present) {
+    text = location.protocol === "file:" ? "Open this from the dashboard to play with the ring. Space works too."
+      : "Can't reach the dashboard, so the ring is out for now. Space works.";
+  } else if (!ring.running) {
+    text = ring.error || (ring.busy ? "The ring is busy with a reading. Space works meanwhile."
+      : "Hands Free is off. Start it to flap with the ring.");
+  } else if (ring.stopping) {
+    state = "connecting"; text = "Hands Free is stopping…";
+  } else if (!ring.connected) {
+    state = "connecting"; text = "Hands Free is connecting to the ring…";
+  } else if (ring.steering) {
+    state = "steering"; text = ring.error || "Hands Free is on. Tap to flap.";
+  } else {
+    state = "running"; text = "Hands Free is paused, so taps don't click. Palm up for a second to turn it back on.";
+  }
+  $("chipLed").dataset.state = state;
+  $("chipText").textContent = text;
+  $("chipStart").hidden = !(ring.present && !ring.running && !ring.busy);
+}
+
+$("chipStart").addEventListener("click", async (e) => {
+  e.stopPropagation();
+  const b = $("chipStart");
+  ring.error = "";
+  b.disabled = true;
+  try {
+    const r = await fetch("/api/screenoura/start", { method: "POST", body: "{}",
+      headers: { "X-Oura-Play": "1", "Content-Type": "application/json" } });
+    if (!r.ok) ring.error = (await r.json()).error || "Hands Free didn't start.";
+  } catch {
+    ring.error = "The dashboard server isn't answering.";
+  }
+  b.disabled = false;
+  renderChip();
+});
+
+// --- sound -------------------------------------------------------------------------
+
+const Sound = {
+  ac: null,
+  on: store.get("flappy.sound", true),
+  wake() {
+    if (!this.ac) {
+      try { this.ac = new (window.AudioContext || window.webkitAudioContext)(); } catch { return; }
+    }
+    if (this.ac.state === "suspended") this.ac.resume();
+  },
+  tone(freq, dur, { type = "sine", gain = 0.12, to = null, delay = 0 } = {}) {
+    const ac = this.ac;
+    if (!ac || !this.on) return;
+    const t = ac.currentTime + delay, osc = ac.createOscillator(), env = ac.createGain();
+    osc.type = type;
+    osc.frequency.setValueAtTime(freq, t);
+    if (to) osc.frequency.exponentialRampToValueAtTime(to, t + dur);
+    env.gain.setValueAtTime(0.0001, t);
+    env.gain.exponentialRampToValueAtTime(gain, t + 0.006);
+    env.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    osc.connect(env).connect(ac.destination);
+    osc.start(t);
+    osc.stop(t + dur + 0.03);
+  },
+  flap() { this.tone(420, 0.09, { type: "triangle", gain: 0.07, to: 760 }); },
+  point() { this.tone(988, 0.08, { gain: 0.09 }); this.tone(1480, 0.14, { gain: 0.07, delay: 0.06 }); },
+  hit() { this.tone(220, 0.3, { type: "square", gain: 0.06, to: 70 }); },
+};
+
+function renderSound() {
+  $("soundBtn").textContent = Sound.on ? "Sound on" : "Sound off";
+  $("soundBtn").setAttribute("aria-pressed", String(Sound.on));
+}
+function toggleSound() {
+  Sound.on = !Sound.on;
+  store.set("flappy.sound", Sound.on);
+  Sound.wake();
+  renderSound();
+}
+$("soundBtn").addEventListener("click", (e) => { e.stopPropagation(); toggleSound(); });
+
+// --- input: a ring tap arrives as an ordinary click -----------------------------------
+
+function tap() {
+  if (G.mode === "title" || (G.mode === "over" && now() >= G.againAt)) startGame();
+  else if (G.mode === "paused" && G.pause.reason !== "steering") { fullScreen(); resume(); }
+  else flap();
+}
+
+cv.addEventListener("pointerdown", (e) => { if (e.button === 0) tap(); });
+window.addEventListener("wheel", (e) => e.preventDefault(), { passive: false });
+window.addEventListener("keydown", (e) => {
+  if (e.repeat || e.metaKey || e.ctrlKey || e.altKey) return;
+  const key = e.key.toLowerCase();
+  const onControl = document.activeElement && document.activeElement.closest("button, a");
+  if (key === "m") toggleSound();
+  else if (key === "escape" || key === "p") pause("key");
+  else if ((key === " " || key === "arrowup" || key === "w" || key === "enter") && !onControl) tap();
+  else return;
+  e.preventDefault();
+});
+document.addEventListener("visibilitychange", () => { if (document.hidden) pause("hidden"); });
+document.addEventListener("fullscreenchange", () => { if (!document.fullscreenElement) pause("fullscreen"); });
+window.addEventListener("resize", resize);
+
+let last = performance.now();
+function frame(t) {
+  const dt = Math.min(0.05, (t - last) / 1000);
+  last = t;
+  update(dt);
+  draw();
+  requestAnimationFrame(frame);
+}
+
+resize();
+renderSound();
+show("title");
+listen();
+Promise.race([document.fonts.ready, new Promise((r) => setTimeout(r, 1500))]).then(() => requestAnimationFrame(frame));
+</script>
+</body>
+</html>

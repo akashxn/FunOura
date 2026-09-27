@@ -1,0 +1,608 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ring Pong</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Host+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  /* Quick Draw's dark titanium table; the ball is a tiny ring. */
+  :root {
+    --field: #171b1f;
+    --plate: #20262b;
+    --plate-hover: #2a3137;
+    --hair: #2b3239;
+    --ink: #e6eaee;
+    --ink-2: #a3adb7;
+    --ink-3: #7a848e;
+    --ti-1: #aeb6bd;
+    --ti-2: #f1f3f5;
+    --ti-3: #88919a;
+    --pulse: #2aa874;
+    --warm: #bb8a24;
+    --oxy: #dc4f66;
+    --dock: #5a88ee;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    overflow: hidden;
+    background: var(--field);
+    color: var(--ink);
+    font: 400 15px/1.5 "Host Grotesk", ui-sans-serif, system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; cursor: none; touch-action: none; }
+  button, a { font: inherit; color: inherit; }
+  :focus-visible { outline: 2px solid var(--dock); outline-offset: 3px; border-radius: 6px; }
+  [hidden] { display: none !important; }
+
+  .screen { position: fixed; inset: 0; pointer-events: none; text-align: center; display: flex; flex-direction: column;
+            align-items: center; justify-content: center; padding: 16px; }
+  .screen a, .screen button { pointer-events: auto; }
+  h1 { margin: 0; font-size: clamp(56px, 9vw, 108px); font-weight: 700; letter-spacing: -0.045em; line-height: .92; }
+  h2 { margin: 0; font-weight: 700; letter-spacing: -0.035em; line-height: 1; font-size: 56px; }
+  .lede { margin: 16px auto 0; max-width: 38ch; color: var(--ink-2); font-size: 17px; }
+  .prompt { margin: 36px 0 0; color: var(--ink); font-size: 18px; font-weight: 600; }
+  .moves { display: inline-grid; grid-template-columns: repeat(3, minmax(0, auto)); gap: 10px 40px; margin: 36px 0 0; text-align: left; }
+  .moves dt { font-weight: 600; }
+  .moves dd { margin: 0; color: var(--ink-2); max-width: 18ch; }
+  .fine { margin: 18px 0 0; color: var(--ink-3); font-size: 14px; }
+  .final { font-size: clamp(72px, 11vw, 120px); font-variant-numeric: tabular-nums; }
+  .verdict { margin: 12px 0 0; color: var(--ink-2); }
+  .verdict.win { color: var(--pulse); font-weight: 600; }
+  .back { position: fixed; top: 22px; left: 28px; color: var(--ink-2); text-decoration: underline; text-underline-offset: 3px; }
+  .back:hover { color: var(--ink); }
+
+  .chip { position: fixed; left: 28px; bottom: 22px; display: flex; align-items: center; gap: 12px; max-width: calc(100vw - 190px);
+          color: var(--ink-2); font-size: 14px; text-align: left; }
+  .led { flex: none; width: 12px; height: 12px; border-radius: 50%; border: 1.5px solid var(--ink-3); }
+  .led[data-state="connecting"] { border-color: var(--dock); background: var(--dock); animation: blink 1s steps(2, jump-none) infinite; }
+  .led[data-state="running"] { border-color: var(--dock); background: color-mix(in srgb, var(--dock) 45%, transparent); }
+  .led[data-state="steering"] { border-color: var(--dock); background: var(--dock); box-shadow: 0 0 0 4px color-mix(in srgb, var(--dock) 22%, transparent); }
+  @keyframes blink { 50% { opacity: .25; } }
+  .btn { flex: none; border: 0; border-radius: 10px; padding: 8px 14px; background: var(--plate); color: var(--ink); cursor: pointer; font-weight: 500; }
+  .btn:hover:not(:disabled) { background: var(--plate-hover); }
+  .btn:disabled { opacity: .5; cursor: default; }
+  .sound { position: fixed; right: 28px; bottom: 22px; }
+  .sound[aria-pressed="false"] { color: var(--ink-3); }
+
+  @media (max-width: 760px) {
+    .moves { grid-template-columns: minmax(0, auto); }
+    .chip { left: 16px; right: 16px; bottom: 16px; max-width: none; flex-wrap: wrap; }
+    .sound { right: 16px; top: 12px; bottom: auto; }
+    .back { left: 16px; top: 16px; }
+  }
+  @media (prefers-reduced-motion: reduce) { .led[data-state="connecting"] { animation: none; } }
+</style>
+</head>
+<body>
+<canvas id="field" aria-label="Ring Pong table"></canvas>
+
+<section class="screen" id="titleScreen">
+  <a class="back" href="/">Back to the dashboard</a>
+  <h1>Ring Pong</h1>
+  <p class="lede">You're on the left. First to 7 wins. The ball speeds up with every hit.</p>
+  <p class="prompt">Tap to start</p>
+  <dl class="moves">
+    <div><dt>Move</dt><dd>Tilt your hand up and down</dd></div>
+    <div><dt>Start</dt><dd>Tap your thumb on your index finger</dd></div>
+    <div><dt>Pause</dt><dd>Palm up for a second</dd></div>
+  </dl>
+  <p class="fine" id="record">No ring? W/S, the arrow keys or the trackpad work too. Esc leaves full screen.</p>
+</section>
+
+<section class="screen" id="pauseScreen" hidden>
+  <h2>Paused</h2>
+  <p class="lede" id="pauseWhy"></p>
+  <p class="prompt" id="pausePrompt">Tap to carry on</p>
+</section>
+
+<section class="screen" id="overScreen" hidden>
+  <a class="back" href="/">Back to the dashboard</a>
+  <h2 class="final" id="finalScore">7–0</h2>
+  <p class="verdict" id="verdict"></p>
+  <p class="fine" id="overStats"></p>
+  <p class="prompt" id="againPrompt">Tap to play again</p>
+</section>
+
+<div class="chip" id="chip">
+  <span class="led" id="chipLed" aria-hidden="true"></span>
+  <span id="chipText">Looking for ScreenOura…</span>
+  <button class="btn" id="chipStart" hidden>Start ScreenOura</button>
+</div>
+<button class="btn sound" id="soundBtn" aria-pressed="true">Sound on</button>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const css = getComputedStyle(document.documentElement);
+const token = (name) => css.getPropertyValue(name).trim();
+const TAU = Math.PI * 2;
+const WIN = 7;
+const BAND = [0.12, 0.88];   // the cursor's useful range: the paddle reaches the walls well before the screen edge
+const INK = token("--ink"), INK3 = token("--ink-3"), HAIR = token("--hair"), DOCK = token("--dock"),
+      PULSE = token("--pulse"), OXY = token("--oxy"), WARM = token("--warm");
+const TITANIUM = ["--ti-1", "--ti-2", "--ti-3"].map(token);
+const clamp = (v, lo, hi) => Math.min(Math.max(v, lo), hi);
+const store = {
+  get(k, fallback) { try { const v = localStorage.getItem(k); return v === null ? fallback : JSON.parse(v); } catch { return fallback; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* private window: fine */ } },
+};
+
+// --- the table ---------------------------------------------------------------------
+
+const cv = $("field"), ctx = cv.getContext("2d");
+let W = 0, H = 0;
+// sizes scale with the window so the game feels the same on any screen
+const size = () => ({ padW: Math.max(10, H * 0.018), padH: H * 0.17, gap: Math.max(28, W * 0.035),
+                      r: Math.max(8, H * 0.014), top: H * 0.06, bottom: H * 0.94 });
+
+const G = {
+  mode: "title",          // title | serve | playing | paused | over
+  you: 0, cpu: 0,
+  me: { y: 0, target: 0 },
+  bot: { y: 0, aimErr: 0 },
+  ball: { x: 0, y: 0, vx: 0, vy: 0, speed: 0 },
+  serveAt: 0, serveTo: -1,  // -1 serves toward you, 1 toward the CPU
+  rally: 0, longest: 0, hits: 0,
+  flash: [], keys: { up: false, down: false },
+  pause: null, ringPlay: false, againAt: 0,
+  record: store.get("pong.record", { wins: 0, losses: 0, longest: 0 }),
+};
+const now = () => performance.now() / 1000;
+
+function resize() {
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const oldH = H || window.innerHeight;
+  W = window.innerWidth;
+  H = window.innerHeight;
+  cv.width = Math.round(W * dpr);
+  cv.height = Math.round(H * dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  for (const o of [G.me, G.bot]) o.y = (o.y || oldH / 2) * H / oldH;
+  G.me.target = G.me.y;
+  if (G.mode === "title") centreBall();
+}
+
+function centreBall() {
+  Object.assign(G.ball, { x: W / 2, y: H / 2, vx: 0, vy: 0 });
+}
+
+function fullScreen() {
+  if (!document.fullscreenElement && document.documentElement.requestFullscreen) {
+    document.documentElement.requestFullscreen().catch(() => {});
+  }
+}
+
+function startMatch() {
+  Sound.wake();
+  fullScreen();
+  Object.assign(G, { you: 0, cpu: 0, rally: 0, longest: 0, hits: 0, flash: [], pause: null });
+  G.ringPlay = ring.running && ring.connected && ring.steering;
+  serve(Math.random() < 0.5 ? -1 : 1, 1.2);
+}
+
+// The ball waits in the middle, then goes toward whoever lost the last point.
+function serve(to, wait = 0.9) {
+  centreBall();
+  G.serveTo = to;
+  G.serveAt = now() + wait;
+  G.rally = 0;
+  G.bot.aimErr = 0;
+  show("serve");
+}
+
+function launch() {
+  const s = size();
+  G.ball.speed = W * 0.42;
+  const a = (Math.random() * 0.6 - 0.3) * Math.PI / 2;  // up to ±27°
+  G.ball.vx = Math.cos(a) * G.ball.speed * G.serveTo;
+  G.ball.vy = Math.sin(a) * G.ball.speed;
+  G.ball.y = clamp(H / 2 + (Math.random() - 0.5) * H * 0.3, s.top + s.r, s.bottom - s.r);
+  Sound.serve();
+  show("playing");
+}
+
+function point(youScored) {
+  if (youScored) G.you++; else G.cpu++;
+  G.longest = Math.max(G.longest, G.rally);
+  G.flash.push({ x: youScored ? W * 0.75 : W * 0.25, t: now(), color: youScored ? PULSE : OXY });
+  if (youScored) Sound.win(); else Sound.lose();
+  if (G.you >= WIN || G.cpu >= WIN) endMatch();
+  else serve(youScored ? 1 : -1);
+}
+
+function endMatch() {
+  const won = G.you > G.cpu;
+  const rec = G.record;
+  if (won) rec.wins++; else rec.losses++;
+  const newLongest = G.longest > rec.longest;
+  rec.longest = Math.max(rec.longest, G.longest);
+  store.set("pong.record", rec);
+  $("finalScore").textContent = `${G.you}–${G.cpu}`;
+  $("verdict").textContent = won ? "You win" : "The computer wins";
+  $("verdict").classList.toggle("win", won);
+  $("overStats").textContent = `Longest rally ${G.longest}${newLongest ? " (your best)" : ""} · ` +
+    `${rec.wins} ${rec.wins === 1 ? "win" : "wins"}, ${rec.losses} ${rec.losses === 1 ? "loss" : "losses"} so far`;
+  centreBall();
+  G.againAt = now() + 1.2;  // a stray tap right at the end can't restart it
+  $("againPrompt").style.visibility = "hidden";
+  setTimeout(() => { $("againPrompt").style.visibility = ""; }, 1200);
+  Sound.end();
+  show("over");
+}
+
+function pause(reason) {
+  if (G.mode !== "playing" && G.mode !== "serve") return;
+  G.pause = { reason, was: G.mode, left: G.serveAt - now() };
+  $("pauseWhy").textContent = {
+    steering: "Steering is paused. Palm up for a second to carry on.",
+    stopped: "ScreenOura stopped. Start it again below, or carry on with the keys or trackpad.",
+    hidden: "The game stops while you can't see it.",
+    fullscreen: "You left full screen.",
+    key: "Take your time.",
+  }[reason];
+  $("pausePrompt").hidden = reason === "steering";
+  show("paused");
+}
+
+function resume() {
+  if (G.mode !== "paused") return;
+  const p = G.pause;
+  G.pause = null;
+  G.ringPlay = ring.running && ring.connected && ring.steering;
+  if (p.was === "serve") { G.serveAt = now() + Math.max(p.left, 0.8); show("serve"); }
+  else { G.serveAt = now() + 0.8; G.serveTo = Math.sign(G.ball.vx) || -1; show("serve", true); }
+}
+
+function show(mode, keepBall = false) {
+  G.mode = mode;
+  G.keepBall = keepBall;
+  $("titleScreen").hidden = mode !== "title";
+  $("pauseScreen").hidden = mode !== "paused";
+  $("overScreen").hidden = mode !== "over";
+  // during a match every tap is a real click: nothing clickable may sit under the cursor
+  const calm = mode === "title" || mode === "paused" || mode === "over";
+  $("chip").hidden = !calm;
+  $("soundBtn").hidden = !calm;
+  if (mode === "title" && (G.record.wins || G.record.losses)) {
+    $("record").textContent = `${G.record.wins}–${G.record.losses} against the computer so far. ` +
+      "W/S, the arrow keys or the trackpad work too. Esc leaves full screen.";
+  }
+}
+
+// --- each frame --------------------------------------------------------------------
+
+function update(dt) {
+  const s = size();
+  const lo = s.top + s.padH / 2, hi = s.bottom - s.padH / 2;
+
+  // you: follow the cursor (or the keys), lightly smoothed since Hands Free already lags a little
+  if (G.keys.up || G.keys.down) G.me.target += (G.keys.down - G.keys.up) * H * 1.1 * dt;
+  G.me.target = clamp(G.me.target, lo, hi);
+  G.me.y += (G.me.target - G.me.y) * Math.min(1, dt * 22);
+
+  if (G.mode === "paused" || G.mode === "title" || G.mode === "over") return;
+
+  // the computer: chases the ball when it's coming, drifts home when it isn't; capped speed and a
+  // slightly wrong guess each rally keep it beatable
+  const b = G.ball, bot = G.bot;
+  const coming = b.vx > 0 && G.mode === "playing";
+  const want = coming ? b.y + bot.aimErr * s.padH : H / 2;
+  const cap = H * (0.62 + 0.03 * G.you);
+  bot.y += clamp(want - bot.y, -cap * dt, cap * dt);
+  bot.y = clamp(bot.y, lo, hi);
+
+  if (G.mode === "serve") {
+    if (now() >= G.serveAt) {
+      if (G.keepBall) { show("playing"); } else launch();
+    }
+    return;
+  }
+
+  // the ball, with swept checks so a fast ball can't slip through a paddle between frames
+  const px = b.x, py = b.y;
+  b.x += b.vx * dt;
+  b.y += b.vy * dt;
+  if (b.y - s.r < s.top) { b.y = s.top + s.r + (s.top + s.r - b.y); b.vy = Math.abs(b.vy); Sound.wall(); }
+  if (b.y + s.r > s.bottom) { b.y = s.bottom - s.r - (b.y + s.r - s.bottom); b.vy = -Math.abs(b.vy); Sound.wall(); }
+
+  const leftFace = s.gap + s.padW, rightFace = W - s.gap - s.padW;
+  if (b.vx < 0 && px - s.r >= leftFace && b.x - s.r < leftFace) {
+    const t = (px - s.r - leftFace) / (px - b.x);
+    if (hitPaddle(G.me.y, py + (b.y - py) * t, s, 1, leftFace + s.r)) return;
+  }
+  if (b.vx > 0 && px + s.r <= rightFace && b.x + s.r > rightFace) {
+    const t = (rightFace - (px + s.r)) / (b.x - px);
+    if (hitPaddle(bot.y, py + (b.y - py) * t, s, -1, rightFace - s.r)) return;
+  }
+  if (b.x < -s.r * 2) point(false);
+  else if (b.x > W + s.r * 2) point(true);
+}
+
+// Where the ball meets the paddle sets its angle: the middle sends it flat, the ends send it steep.
+function hitPaddle(padY, ballY, s, dir, faceX) {
+  const rel = (ballY - padY) / (s.padH / 2 + s.r);
+  if (Math.abs(rel) > 1) return false;
+  const b = G.ball;
+  b.speed = Math.min(b.speed * 1.06, W * 1.15);
+  const a = rel * (Math.PI * 0.3);  // up to 54°
+  b.vx = Math.cos(a) * b.speed * dir;
+  b.vy = Math.sin(a) * b.speed;
+  b.x = faceX;
+  b.y = ballY;
+  G.rally++;
+  if (dir === 1) G.hits++;
+  // the computer's next guess: a bit off, more so as the ball gets quicker
+  G.bot.aimErr = (Math.random() - 0.5) * (0.9 + b.speed / W * 0.6);
+  Sound.paddle(dir === 1);
+  return true;
+}
+
+// --- drawing -----------------------------------------------------------------------
+
+function draw() {
+  const s = size();
+  ctx.clearRect(0, 0, W, H);
+
+  // walls and the net
+  ctx.fillStyle = HAIR;
+  ctx.fillRect(0, s.top - 2, W, 2);
+  ctx.fillRect(0, s.bottom, W, 2);
+  const dash = H * 0.03;
+  if (G.mode !== "title" && G.mode !== "over") for (let y = s.top + dash / 2; y < s.bottom; y += dash * 2) ctx.fillRect(W / 2 - 1.5, y, 3, dash);
+
+  // scores, big and faint behind the play
+  ctx.textAlign = "center";
+  ctx.textBaseline = "top";
+  ctx.font = `700 ${Math.round(H * 0.16)}px "Host Grotesk", system-ui, sans-serif`;
+  ctx.fillStyle = "rgba(230,234,238,0.10)";
+  if (G.mode !== "title" && G.mode !== "over") {
+    ctx.fillText(String(G.you), W * 0.25, s.top + H * 0.04);
+    ctx.fillText(String(G.cpu), W * 0.75, s.top + H * 0.04);
+  }
+  // a glow on the side that just scored
+  const t = now();
+  G.flash = G.flash.filter((f) => t - f.t < 0.6);
+  for (const f of G.flash) {
+    ctx.fillStyle = f.color;
+    ctx.globalAlpha = 0.18 * (1 - (t - f.t) / 0.6);
+    ctx.fillRect(f.x - W * 0.25, s.top, W * 0.5, s.bottom - s.top);
+    ctx.globalAlpha = 1;
+  }
+
+  if (G.mode === "serve" || G.mode === "playing" || G.mode === "paused") {
+    if (G.rally >= 3) {
+      ctx.font = `500 ${Math.round(Math.max(14, H * 0.022))}px "Host Grotesk", system-ui, sans-serif`;
+      ctx.fillStyle = INK3;
+      ctx.fillText(`Rally ${G.rally}`, W / 2, s.bottom + 10);
+    }
+  }
+
+  paddle(s.gap, G.me.y, s, DOCK);
+  paddle(W - s.gap - s.padW, G.bot.y, s, WARM);
+  if (G.mode !== "title" && G.mode !== "over") ball(s);
+}
+
+function paddle(x, y, s, color) {
+  ctx.save();
+  ctx.shadowColor = color;
+  ctx.shadowBlur = 14;
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.roundRect(x, y - s.padH / 2, s.padW, s.padH, s.padW / 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+// the ball is a little titanium ring
+function ball(s) {
+  const { x, y } = G.ball;
+  const waiting = G.mode === "serve" && !G.keepBall;
+  ctx.save();
+  if (waiting) ctx.globalAlpha = 0.45 + 0.35 * Math.sin(now() * 8);
+  const g = ctx.createLinearGradient(x - s.r, y - s.r, x + s.r, y + s.r);
+  g.addColorStop(0, TITANIUM[0]); g.addColorStop(0.45, TITANIUM[1]); g.addColorStop(1, TITANIUM[2]);
+  ctx.lineWidth = s.r * 0.55;
+  ctx.strokeStyle = g;
+  ctx.beginPath(); ctx.arc(x, y, s.r - ctx.lineWidth / 2, 0, TAU); ctx.stroke();
+  ctx.restore();
+}
+
+// --- ScreenOura, from the dashboard's live updates (as in Quick Draw) -----------------
+
+const ring = { present: false, running: false, connected: false, steering: false, stopping: false, busy: null, error: "" };
+
+function listen() {
+  if (location.protocol === "file:") { renderChip(); return; }
+  const es = new EventSource("/api/stream");
+  es.onopen = () => { ring.present = true; renderChip(); };
+  es.onerror = () => { ring.present = false; ring.running = false; renderChip(); };
+  es.onmessage = (e) => {
+    const m = JSON.parse(e.data);
+    if (m.type === "state") {
+      ring.busy = m.busy;
+      ring.running = m.busy === "screenoura";
+      screenFields(m.screenoura);
+    } else if (m.type === "busy") {
+      ring.busy = m.what;
+      ring.running = m.what === "screenoura";
+      if (ring.running) ring.error = "";
+      else screenFields({});
+    } else if (m.type === "screen") {
+      screenFields(m);
+    } else if (m.type === "error" && m.name === "screenoura") {
+      ring.error = m.message;
+    } else {
+      return;
+    }
+    ringChanged();
+  };
+}
+
+function screenFields(s) {
+  ring.connected = Boolean(s && s.connected);
+  ring.steering = Boolean(s && s.steering);
+  ring.stopping = Boolean(s && s.stopping);
+}
+
+function ringChanged() {
+  const steering = ring.running && ring.connected && ring.steering && !ring.stopping;
+  if (G.ringPlay && (G.mode === "playing" || G.mode === "serve")) {
+    if (!ring.running || ring.stopping) pause("stopped");
+    else if (ring.connected && !ring.steering) pause("steering");  // palm up: the pause gesture
+  } else if (G.mode === "paused" && G.pause.reason === "steering") {
+    if (steering) resume();
+    else if (!ring.running || ring.stopping) showStopped();
+  }
+  renderChip();
+}
+
+function showStopped() {
+  // already paused for steering, and now the ring is gone: say so and let a tap or key resume
+  G.pause.reason = "stopped";
+  $("pauseWhy").textContent = "ScreenOura stopped. Start it again below, or carry on with the keys or trackpad.";
+  $("pausePrompt").hidden = false;
+}
+
+function renderChip() {
+  let state = "off", text;
+  if (!ring.present) {
+    text = location.protocol === "file:" ? "Open this from the dashboard to play with the ring. The keys work too."
+      : "Can't reach the dashboard, so the ring is out for now. The keys and trackpad work.";
+  } else if (!ring.running) {
+    text = ring.error || (ring.busy ? "The ring is busy with a reading. The keys and trackpad work meanwhile."
+      : "Hands Free is off. Start it to play with the ring.");
+  } else if (ring.stopping) {
+    state = "connecting"; text = "Hands Free is stopping…";
+  } else if (!ring.connected) {
+    state = "connecting"; text = "Hands Free is connecting to the ring…";
+  } else if (ring.steering) {
+    state = "steering"; text = ring.error || "Hands Free is steering. Tilt to move your paddle.";
+  } else {
+    state = "running"; text = "Hands Free is paused. Palm up for a second to steer.";
+  }
+  $("chipLed").dataset.state = state;
+  $("chipText").textContent = text;
+  $("chipStart").hidden = !(ring.present && !ring.running && !ring.busy);
+}
+
+$("chipStart").addEventListener("click", async (e) => {
+  e.stopPropagation();
+  const b = $("chipStart");
+  ring.error = "";
+  b.disabled = true;
+  try {
+    const r = await fetch("/api/screenoura/start", { method: "POST", body: "{}",
+      headers: { "X-Oura-Play": "1", "Content-Type": "application/json" } });
+    if (!r.ok) ring.error = (await r.json()).error || "Hands Free didn't start.";
+  } catch {
+    ring.error = "The dashboard server isn't answering.";
+  }
+  b.disabled = false;
+  renderChip();
+});
+
+// --- sound -------------------------------------------------------------------------
+
+const Sound = {
+  ac: null,
+  on: store.get("pong.sound", true),
+  wake() {
+    if (!this.ac) {
+      try { this.ac = new (window.AudioContext || window.webkitAudioContext)(); } catch { return; }
+    }
+    if (this.ac.state === "suspended") this.ac.resume();
+  },
+  tone(freq, dur, { type = "sine", gain = 0.12, to = null, delay = 0 } = {}) {
+    const ac = this.ac;
+    if (!ac || !this.on) return;
+    const t = ac.currentTime + delay, osc = ac.createOscillator(), env = ac.createGain();
+    osc.type = type;
+    osc.frequency.setValueAtTime(freq, t);
+    if (to) osc.frequency.exponentialRampToValueAtTime(to, t + dur);
+    env.gain.setValueAtTime(0.0001, t);
+    env.gain.exponentialRampToValueAtTime(gain, t + 0.006);
+    env.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    osc.connect(env).connect(ac.destination);
+    osc.start(t);
+    osc.stop(t + dur + 0.03);
+  },
+  paddle(mine) { this.tone(mine ? 660 : 520, 0.07, { type: "square", gain: 0.06 }); },
+  wall() { this.tone(330, 0.05, { type: "square", gain: 0.04 }); },
+  serve() { this.tone(440, 0.06, { type: "triangle", gain: 0.08 }); },
+  win() { this.tone(784, 0.1, { gain: 0.1 }); this.tone(1175, 0.16, { gain: 0.08, delay: 0.08 }); },
+  lose() { this.tone(262, 0.22, { type: "triangle", gain: 0.09, to: 175 }); },
+  end() { this.tone(659, 0.15, { type: "triangle", gain: 0.09 }); this.tone(523, 0.32, { type: "triangle", gain: 0.09, delay: 0.16 }); },
+};
+
+function renderSound() {
+  $("soundBtn").textContent = Sound.on ? "Sound on" : "Sound off";
+  $("soundBtn").setAttribute("aria-pressed", String(Sound.on));
+}
+function toggleSound() {
+  Sound.on = !Sound.on;
+  store.set("pong.sound", Sound.on);
+  Sound.wake();
+  renderSound();
+}
+$("soundBtn").addEventListener("click", (e) => { e.stopPropagation(); toggleSound(); });
+
+// --- input: the ring arrives as an ordinary mouse ------------------------------------
+
+function tap() {
+  if (G.mode === "title" || (G.mode === "over" && now() >= G.againAt)) startMatch();
+  else if (G.mode === "paused" && G.pause.reason !== "steering") { fullScreen(); resume(); }
+  // during play a tap does nothing: it only jolts the cursor
+}
+
+cv.addEventListener("pointermove", (e) => {
+  const s = size();
+  const f = clamp((e.clientY / H - BAND[0]) / (BAND[1] - BAND[0]), 0, 1);
+  G.me.target = s.top + s.padH / 2 + f * (s.bottom - s.top - s.padH);
+});
+cv.addEventListener("pointerdown", (e) => { if (e.button === 0) tap(); });
+// a sweep arrives as scroll events: the page never scrolls
+window.addEventListener("wheel", (e) => e.preventDefault(), { passive: false });
+const KEYS = { w: "up", arrowup: "up", s: "down", arrowdown: "down" };
+window.addEventListener("keydown", (e) => {
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  const key = e.key.toLowerCase();
+  if (KEYS[key]) { G.keys[KEYS[key]] = true; e.preventDefault(); return; }
+  if (e.repeat) return;
+  const onControl = document.activeElement && document.activeElement.closest("button, a");
+  if (key === "m") toggleSound();
+  else if (key === "escape" || key === "p") pause("key");
+  else if ((key === " " || key === "enter") && !onControl) {
+    if (G.mode === "paused") { fullScreen(); resume(); } else tap();
+  } else return;
+  e.preventDefault();
+});
+window.addEventListener("keyup", (e) => { const k = KEYS[e.key.toLowerCase()]; if (k) G.keys[k] = false; });
+document.addEventListener("visibilitychange", () => { if (document.hidden) pause("hidden"); });
+document.addEventListener("fullscreenchange", () => { if (!document.fullscreenElement) pause("fullscreen"); });
+window.addEventListener("resize", resize);
+
+let last = performance.now();
+function frame(t) {
+  const dt = Math.min(0.05, (t - last) / 1000);
+  last = t;
+  update(dt);
+  draw();
+  requestAnimationFrame(frame);
+}
+
+resize();
+G.me.y = G.me.target = G.bot.y = H / 2;
+renderSound();
+show("title");
+listen();
+Promise.race([document.fonts.ready, new Promise((r) => setTimeout(r, 1500))]).then(() => requestAnimationFrame(frame));
+</script>
+</body>
+</html>
